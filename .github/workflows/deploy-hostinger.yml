@@ -1,0 +1,49 @@
+name: Deploy PEPA to Hostinger
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy project to Hostinger
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "."
+          target: ${{ secrets.PEPA_DEPLOY_PATH }}
+          overwrite: true
+          rm: false
+
+      - name: Deploy container on Hostinger
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -eu
+            DEPLOY_PATH="${{ secrets.PEPA_DEPLOY_PATH }}"
+            mkdir -p "$DEPLOY_PATH/data"
+            cat > "$DEPLOY_PATH/.env" <<'EOF'
+            PEPA_DATA_DIR=/app/data
+            EOF
+            cd "$DEPLOY_PATH"
+            docker build -t pepa-saas:latest .
+            docker rm -f pepa-saas-hml || true
+            docker run -d \
+              --name pepa-saas-hml \
+              --restart unless-stopped \
+              --env-file "$DEPLOY_PATH/.env" \
+              -v "$DEPLOY_PATH/data:/app/data" \
+              -p 3101:3000 \
+              pepa-saas:latest
