@@ -44,6 +44,17 @@ jobs:
               --name pepa-saas-hml \
               --restart unless-stopped \
               --env-file "$DEPLOY_PATH/.env" \
+              --network easypanel \
+              --label traefik.enable=true \
+              --label traefik.http.routers.pepa-http.rule=Host\(\`pepa.tavarestech.cloud\`\) \
+              --label traefik.http.routers.pepa-http.entrypoints=http \
+              --label traefik.http.routers.pepa-http.middlewares=pepa-https-redirect \
+              --label traefik.http.middlewares.pepa-https-redirect.redirectscheme.scheme=https \
+              --label traefik.http.routers.pepa-https.rule=Host\(\`pepa.tavarestech.cloud\`\) \
+              --label traefik.http.routers.pepa-https.entrypoints=https \
+              --label traefik.http.routers.pepa-https.tls=true \
+              --label traefik.http.routers.pepa-https.tls.certresolver=letsencrypt \
+              --label traefik.http.services.pepa.loadbalancer.server.port=3000 \
               -v "$DEPLOY_PATH/data:/app/data" \
               -p 3101:3000 \
               pepa-saas:latest
