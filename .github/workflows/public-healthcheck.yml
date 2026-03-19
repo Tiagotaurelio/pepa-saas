@@ -15,3 +15,9 @@ jobs:
       - name: Check public demo page
         run: |
           curl -fsS https://pepa.tavarestech.cloud/demo >/dev/null
+      - name: Notify failure webhook
+        if: failure() && secrets.ALERT_WEBHOOK_URL != ''
+        run: |
+          curl -fsS -X POST "${{ secrets.ALERT_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d "{\"app\":\"pepa-saas\",\"workflow\":\"public-healthcheck\",\"status\":\"failure\",\"url\":\"https://pepa.tavarestech.cloud/api/health\"}"

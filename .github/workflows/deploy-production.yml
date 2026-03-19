@@ -1,19 +1,17 @@
-name: Deploy PEPA to Hostinger
+name: Deploy PEPA to Production
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   deploy:
+    environment: production
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Copy project to Hostinger
+      - name: Copy project to production host
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -24,7 +22,7 @@ jobs:
           overwrite: true
           rm: false
 
-      - name: Deploy container on Hostinger
+      - name: Deploy production container
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -33,6 +31,10 @@ jobs:
           script: |
             set -eu
             DEPLOY_PATH="${{ secrets.PEPA_DEPLOY_PATH }}"
+            PUBLIC_DOMAIN="${{ secrets.PEPA_PUBLIC_DOMAIN }}"
+            if [ -z "$PUBLIC_DOMAIN" ]; then
+              PUBLIC_DOMAIN="pepa.tavarestech.cloud"
+            fi
             mkdir -p "$DEPLOY_PATH/data"
             cat > "$DEPLOY_PATH/.env" <<'EOF'
             PEPA_DATA_DIR=/app/data
@@ -51,60 +53,42 @@ jobs:
             EOF
             cd "$DEPLOY_PATH"
             docker build -t pepa-saas:latest .
-            docker rm -f pepa-saas-hml || true
+            docker rm -f pepa-saas-prod || true
             docker run -d \
-              --name pepa-saas-hml \
+              --name pepa-saas-prod \
               --restart unless-stopped \
               --env-file "$DEPLOY_PATH/.env" \
               --network easypanel \
               -v "$DEPLOY_PATH/data:/app/data" \
-              -p 3101:3000 \
+              -p 3201:3000 \
               pepa-saas:latest
             TRAEFIK_CONTAINER="$(docker ps --filter name=traefik --format '{{.Names}}' | head -n 1)"
             if [ -n "$TRAEFIK_CONTAINER" ]; then
-              docker exec "$TRAEFIK_CONTAINER" sh -lc "cat > /data/config/tavarestech.yml <<'EOF'
+              docker exec "$TRAEFIK_CONTAINER" sh -lc "cat > /data/config/pepa-production.yml <<EOF
             http:
               routers:
-                reactive-http:
-                  rule: Host(\"reactive.tavarestech.cloud\")
+                pepa-production-http:
+                  rule: Host(\"$PUBLIC_DOMAIN\")
                   entryPoints:
                     - http
                   middlewares:
                     - redirect-to-https
-                  service: reactive-service
-                reactive-https:
-                  rule: Host(\"reactive.tavarestech.cloud\")
+                  service: pepa-production-service
+                pepa-production-https:
+                  rule: Host(\"$PUBLIC_DOMAIN\")
                   entryPoints:
                     - https
                   tls:
                     certResolver: letsencrypt
-                  service: reactive-service
-                pepa-http:
-                  rule: Host(\"pepa.tavarestech.cloud\")
-                  entryPoints:
-                    - http
-                  middlewares:
-                    - redirect-to-https
-                  service: pepa-service
-                pepa-https:
-                  rule: Host(\"pepa.tavarestech.cloud\")
-                  entryPoints:
-                    - https
-                  tls:
-                    certResolver: letsencrypt
-                  service: pepa-service
+                  service: pepa-production-service
               middlewares:
                 redirect-to-https:
                   redirectScheme:
                     scheme: https
               services:
-                reactive-service:
+                pepa-production-service:
                   loadBalancer:
                     servers:
-                      - url: http://reactive-saas-hml:3000
-                pepa-service:
-                  loadBalancer:
-                    servers:
-                      - url: http://pepa-saas-hml:3000
+                      - url: http://pepa-saas-prod:3000
             EOF"
             fi

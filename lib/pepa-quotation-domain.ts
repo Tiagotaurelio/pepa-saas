@@ -4,6 +4,9 @@ export type PepaAttachment = {
   supplierName: string | null;
   extractionStatus: "parsed" | "ocr-required" | "template-pending";
   notes: string;
+  storageProvider?: "local" | "s3";
+  storageKey?: string | null;
+  storageUrl?: string | null;
 };
 
 export type RequestedItem = {

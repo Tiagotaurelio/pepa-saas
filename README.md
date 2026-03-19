@@ -55,6 +55,7 @@ Exemplo de resposta:
 - Em testes, `PEPA_DATA_DIR` isola banco e arquivos
 - Com `PEPA_DATABASE_URL`, o app passa a usar Postgres para sessoes e rodadas
 - `PEPA_DATABASE_SCHEMA` permite isolar o PEPA em um schema proprio, como `pepa`
+- `PEPA_OBJECT_STORAGE_*` permite mover anexos para storage gerenciado compativel com S3
 
 ## Fluxo demo
 
@@ -107,6 +108,13 @@ CONFIRM_RESTORE=yes sh /opt/apps/homologation/restore-pepa-data.sh /opt/apps/bac
 - Healthcheck publico: `https://pepa.tavarestech.cloud/api/health`
 - Workflow agendado de healthcheck: [public-healthcheck.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-healthcheck.yml)
 - Workflow agendado de smoke funcional: [public-smoke.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-smoke.yml)
+- Webhook opcional de alerta: secret `ALERT_WEBHOOK_URL`
+
+## Producao separada
+
+- Workflow de deploy dedicado: [deploy-production.yml](/Users/tiagotavares/pepa-saas/.github/workflows/deploy-production.yml)
+- Dominio de producao via secret `PEPA_PUBLIC_DOMAIN`
+- Recomendado usar GitHub Environment `production`
 
 ## Observacoes
 

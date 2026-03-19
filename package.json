@@ -11,6 +11,7 @@
     "smoke:deploy": "sh ./scripts/post-deploy-smoke.sh"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.888.0",
     "better-sqlite3": "^12.8.0",
     "exceljs": "^4.4.0",
     "next": "^16.1.7",

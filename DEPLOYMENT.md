@@ -23,6 +23,15 @@
   - opcional
   - default `public`
   - use `pepa` para separar as tabelas do app em um schema proprio
+- `PEPA_OBJECT_STORAGE_BUCKET`
+- `PEPA_OBJECT_STORAGE_REGION`
+- `PEPA_OBJECT_STORAGE_ENDPOINT`
+- `PEPA_OBJECT_STORAGE_ACCESS_KEY_ID`
+- `PEPA_OBJECT_STORAGE_SECRET_ACCESS_KEY`
+- `PEPA_OBJECT_STORAGE_PUBLIC_BASE_URL`
+- `PEPA_OBJECT_STORAGE_FORCE_PATH_STYLE`
+- `PEPA_OBJECT_STORAGE_PREFIX`
+- `PEPA_OBJECT_STORAGE_MIRROR_LOCAL`
 
 ## Persistencia
 
@@ -46,6 +55,7 @@ Arquivo base:
 Workflow pronto:
 
 - [deploy-hostinger.yml](/Users/tiagotavares/pepa-saas/.github/workflows/deploy-hostinger.yml)
+- [deploy-production.yml](/Users/tiagotavares/pepa-saas/.github/workflows/deploy-production.yml)
 - [public-healthcheck.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-healthcheck.yml)
 - [public-smoke.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-smoke.yml)
 
@@ -58,6 +68,17 @@ Secrets esperados no GitHub:
 - `PEPA_DATABASE_URL`
 - `PEPA_DATABASE_SSL`
 - `PEPA_DATABASE_SCHEMA`
+- `PEPA_OBJECT_STORAGE_BUCKET`
+- `PEPA_OBJECT_STORAGE_REGION`
+- `PEPA_OBJECT_STORAGE_ENDPOINT`
+- `PEPA_OBJECT_STORAGE_ACCESS_KEY_ID`
+- `PEPA_OBJECT_STORAGE_SECRET_ACCESS_KEY`
+- `PEPA_OBJECT_STORAGE_PUBLIC_BASE_URL`
+- `PEPA_OBJECT_STORAGE_FORCE_PATH_STYLE`
+- `PEPA_OBJECT_STORAGE_PREFIX`
+- `PEPA_OBJECT_STORAGE_MIRROR_LOCAL`
+- `PEPA_PUBLIC_DOMAIN`
+- `ALERT_WEBHOOK_URL`
 
 ## Healthcheck
 

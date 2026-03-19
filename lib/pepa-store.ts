@@ -3,6 +3,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
 import pdfParse from "pdf-parse";
 
@@ -53,6 +54,13 @@ type ParsedSupplierFile = {
   paymentTerms: string;
   freightTerms: string;
   quoteDate: string | null;
+};
+
+type StoredUploadMeta = {
+  storageProvider: "local" | "s3";
+  storageKey: string;
+  storageUrl: string | null;
+  fileName: string;
 };
 
 export async function readPepaSnapshot(tenantId: string, roundId?: string): Promise<PepaSnapshot> {
@@ -247,17 +255,16 @@ export async function persistPepaUploadRound(params: {
 }): Promise<PepaSnapshot> {
   const roundId = randomUUID();
   const createdAt = new Date().toISOString();
-  const roundDirectory = path.join(getUploadsRoot(), params.tenantId, roundId);
-  await mkdir(roundDirectory, { recursive: true });
-
-  await writeFile(path.join(roundDirectory, sanitizeFileName(params.mirrorFile.name)), params.mirrorFile.buffer);
+  const storedUploads = new Map<string, StoredUploadMeta>();
+  const mirrorStored = await persistUploadFile(params.tenantId, roundId, params.mirrorFile);
+  storedUploads.set(params.mirrorFile.name, mirrorStored);
   for (const supplierFile of params.supplierFiles) {
-    await writeFile(path.join(roundDirectory, sanitizeFileName(supplierFile.name)), supplierFile.buffer);
+    storedUploads.set(supplierFile.name, await persistUploadFile(params.tenantId, roundId, supplierFile));
   }
 
   const requestedItems = await extractRequestedItemsFromMirror(params.mirrorFile);
   const parsedSupplierFiles = await Promise.all(params.supplierFiles.map(parseSupplierFile));
-  const attachments = buildAttachments(params.mirrorFile, parsedSupplierFiles, requestedItems.length);
+  const attachments = buildAttachments(params.mirrorFile, parsedSupplierFiles, requestedItems.length, storedUploads);
   const comparisonRows = buildComparisonRows(requestedItems, parsedSupplierFiles);
   const suppliers = buildSuppliers(parsedSupplierFiles, comparisonRows);
   const quotedItems = comparisonRows.filter((row) => row.itemStatus === "quoted").length;
@@ -314,8 +321,10 @@ export async function persistPepaUploadRound(params: {
 function buildAttachments(
   mirrorFile: UploadFileInput,
   supplierFiles: ParsedSupplierFile[],
-  requestedItemsCount: number
+  requestedItemsCount: number,
+  storedUploads: Map<string, StoredUploadMeta>
 ): PepaAttachment[] {
+  const mirrorStored = storedUploads.get(mirrorFile.name);
   const mirrorParsed = requestedItemsCount > 0;
   const mirrorAttachment: PepaAttachment = {
     fileName: mirrorFile.name,
@@ -323,11 +332,15 @@ function buildAttachments(
     supplierName: null,
     extractionStatus: mirrorParsed ? "parsed" : "template-pending",
     notes: mirrorParsed
-      ? `Arquivo-base salvo e lido com ${requestedItemsCount} item(ns) estruturado(s) para o comparativo.`
-      : "Arquivo-base salvo, mas sem colunas suficientes para estruturar os itens automaticamente."
+      ? `Arquivo-base salvo em ${describeStorage(mirrorStored)} e lido com ${requestedItemsCount} item(ns) estruturado(s) para o comparativo.`
+      : `Arquivo-base salvo em ${describeStorage(mirrorStored)}, mas sem colunas suficientes para estruturar os itens automaticamente.`,
+    storageProvider: mirrorStored?.storageProvider,
+    storageKey: mirrorStored?.storageKey ?? null,
+    storageUrl: mirrorStored?.storageUrl ?? null
   };
 
   const supplierAttachments = supplierFiles.map<PepaAttachment>((file) => {
+    const stored = storedUploads.get(file.sourceFile);
     const parsed = file.extractionStatus === "parsed";
     return {
       fileName: file.sourceFile,
@@ -335,8 +348,11 @@ function buildAttachments(
       supplierName: file.supplierName,
       extractionStatus: parsed ? "parsed" : "ocr-required",
       notes: parsed
-        ? `Arquivo salvo com sucesso. ${file.quotedItems.length} item(ns) de cotacao foram reconhecidos para reconciliacao automatica.`
-        : "Arquivo salvo e encaminhado para fila OCR antes da reconciliacao automatica dos itens."
+        ? `Arquivo salvo em ${describeStorage(stored)}. ${file.quotedItems.length} item(ns) de cotacao foram reconhecidos para reconciliacao automatica.`
+        : `Arquivo salvo em ${describeStorage(stored)} e encaminhado para fila OCR antes da reconciliacao automatica dos itens.`,
+      storageProvider: stored?.storageProvider,
+      storageKey: stored?.storageKey ?? null,
+      storageUrl: stored?.storageUrl ?? null
     };
   });
 
@@ -627,6 +643,87 @@ function normalizeHeader(value: string) {
 function getUploadsRoot() {
   const dataRoot = process.env.PEPA_DATA_DIR?.trim() || path.join(process.cwd(), "data");
   return path.join(dataRoot, "pepa-uploads");
+}
+
+function hasObjectStorageConfig() {
+  return Boolean(
+    process.env.PEPA_OBJECT_STORAGE_BUCKET &&
+      process.env.PEPA_OBJECT_STORAGE_ACCESS_KEY_ID &&
+      process.env.PEPA_OBJECT_STORAGE_SECRET_ACCESS_KEY
+  );
+}
+
+let objectStorageClient: S3Client | null = null;
+
+function getObjectStorageClient() {
+  if (objectStorageClient) {
+    return objectStorageClient;
+  }
+
+  const region = process.env.PEPA_OBJECT_STORAGE_REGION?.trim() || "sa-east-1";
+  objectStorageClient = new S3Client({
+    region,
+    endpoint: process.env.PEPA_OBJECT_STORAGE_ENDPOINT?.trim() || undefined,
+    forcePathStyle: process.env.PEPA_OBJECT_STORAGE_FORCE_PATH_STYLE === "true",
+    credentials: {
+      accessKeyId: process.env.PEPA_OBJECT_STORAGE_ACCESS_KEY_ID?.trim() || "",
+      secretAccessKey: process.env.PEPA_OBJECT_STORAGE_SECRET_ACCESS_KEY?.trim() || ""
+    }
+  });
+  return objectStorageClient;
+}
+
+async function persistUploadFile(tenantId: string, roundId: string, file: UploadFileInput): Promise<StoredUploadMeta> {
+  const sanitizedName = sanitizeFileName(file.name);
+  const relativeKey = `${tenantId}/${roundId}/${sanitizedName}`;
+
+  if (hasObjectStorageConfig()) {
+    const prefix = process.env.PEPA_OBJECT_STORAGE_PREFIX?.trim();
+    const objectKey = prefix ? `${prefix.replace(/\/+$/, "")}/${relativeKey}` : relativeKey;
+    await getObjectStorageClient().send(
+      new PutObjectCommand({
+        Bucket: process.env.PEPA_OBJECT_STORAGE_BUCKET,
+        Key: objectKey,
+        Body: file.buffer,
+        ContentType: file.type || "application/octet-stream"
+      })
+    );
+
+    if (process.env.PEPA_OBJECT_STORAGE_MIRROR_LOCAL === "true") {
+      const roundDirectory = path.join(getUploadsRoot(), tenantId, roundId);
+      await mkdir(roundDirectory, { recursive: true });
+      await writeFile(path.join(roundDirectory, sanitizedName), file.buffer);
+    }
+
+    const publicBase = process.env.PEPA_OBJECT_STORAGE_PUBLIC_BASE_URL?.trim();
+    const publicUrl = publicBase ? `${publicBase.replace(/\/+$/, "")}/${objectKey}` : null;
+
+    return {
+      storageProvider: "s3",
+      storageKey: objectKey,
+      storageUrl: publicUrl,
+      fileName: sanitizedName
+    };
+  }
+
+  const roundDirectory = path.join(getUploadsRoot(), tenantId, roundId);
+  await mkdir(roundDirectory, { recursive: true });
+  await writeFile(path.join(roundDirectory, sanitizedName), file.buffer);
+
+  return {
+    storageProvider: "local",
+    storageKey: relativeKey,
+    storageUrl: null,
+    fileName: sanitizedName
+  };
+}
+
+function describeStorage(meta: StoredUploadMeta | undefined) {
+  if (!meta) {
+    return "storage local";
+  }
+
+  return meta.storageProvider === "s3" ? "storage gerenciado" : "storage local";
 }
 
 function inferSupplierName(fileName: string) {
