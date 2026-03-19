@@ -82,6 +82,30 @@ Variaveis opcionais:
 - `PEPA_SMOKE_EMAIL`
 - `PEPA_SMOKE_PASSWORD`
 
+## Backup do PEPA
+
+- Backup versionado no VPS: `/opt/apps/backups/pepa`
+- Script de backup: [backup-pepa-data.sh](/Users/tiagotavares/homologation/backup-pepa-data.sh)
+- Script de restauracao: [restore-pepa-data.sh](/Users/tiagotavares/homologation/restore-pepa-data.sh)
+
+Exemplo manual no servidor:
+
+```bash
+sh /opt/apps/homologation/backup-pepa-data.sh
+```
+
+Exemplo de restauracao:
+
+```bash
+CONFIRM_RESTORE=yes sh /opt/apps/homologation/restore-pepa-data.sh /opt/apps/backups/pepa/pepa-data-YYYYMMDD-HHMMSS.tar.gz
+```
+
+## Monitoramento
+
+- Healthcheck publico: `https://pepa.tavarestech.cloud/api/health`
+- Workflow agendado de healthcheck: [public-healthcheck.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-healthcheck.yml)
+- Workflow agendado de smoke funcional: [public-smoke.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-smoke.yml)
+
 ## Observacoes
 
 - O app esta em `Next 16`

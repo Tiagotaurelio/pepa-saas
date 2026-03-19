@@ -1,0 +1,18 @@
+name: Public Smoke PEPA
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "10 10 * * *"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run public smoke
+        env:
+          APP_URL: https://pepa.tavarestech.cloud
+        run: |
+          sh ./scripts/post-deploy-smoke.sh

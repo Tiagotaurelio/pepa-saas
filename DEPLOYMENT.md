@@ -34,6 +34,8 @@ Arquivo base:
 Workflow pronto:
 
 - [deploy-hostinger.yml](/Users/tiagotavares/pepa-saas/.github/workflows/deploy-hostinger.yml)
+- [public-healthcheck.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-healthcheck.yml)
+- [public-smoke.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-smoke.yml)
 
 Secrets esperados no GitHub:
 
@@ -66,6 +68,19 @@ Se o ambiente usar credenciais diferentes, sobrescreva:
 ```bash
 PEPA_SMOKE_EMAIL=operacao@example.com PEPA_SMOKE_PASSWORD=segredo APP_URL=https://seu-ambiente.example.com npm run smoke:deploy
 ```
+
+## Backup e restauracao
+
+Scripts operacionais:
+
+- [backup-pepa-data.sh](/Users/tiagotavares/homologation/backup-pepa-data.sh)
+- [restore-pepa-data.sh](/Users/tiagotavares/homologation/restore-pepa-data.sh)
+
+Sugestao de rotina no VPS:
+
+- backup diario do diretorio `data`
+- retencao inicial de 14 dias
+- restauracao com snapshot previo para rollback
 
 ## Inicio em producao
 

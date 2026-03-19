@@ -1,0 +1,17 @@
+name: Public Healthcheck PEPA
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check public health endpoint
+        run: |
+          curl -fsS https://pepa.tavarestech.cloud/api/health
+      - name: Check public demo page
+        run: |
+          curl -fsS https://pepa.tavarestech.cloud/demo >/dev/null
