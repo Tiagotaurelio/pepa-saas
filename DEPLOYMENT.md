@@ -13,18 +13,30 @@
 - `PEPA_DATA_DIR`
   - opcional
   - diretorio de banco SQLite e uploads
+- `PEPA_DATABASE_URL`
+  - opcional
+  - quando presente, ativa Postgres para sessoes e snapshots
+- `PEPA_DATABASE_SSL`
+  - opcional
+  - use `require` quando o provedor exigir SSL
+- `PEPA_DATABASE_SCHEMA`
+  - opcional
+  - default `public`
+  - use `pepa` para separar as tabelas do app em um schema proprio
 
 ## Persistencia
 
 - SQLite em `data/pepa.db`
 - anexos e arquivos da rodada no mesmo data root
+- Com `PEPA_DATABASE_URL`: Postgres para sessoes e rodadas, mantendo uploads em `data`
 
 ## Hostinger + GitHub
 
 Recomendacao para o seu caso:
 
 - Hostinger VPS para executar o container
-- volume persistente local para banco e anexos
+- Supabase Postgres para sessoes e snapshots
+- volume persistente local para anexos e arquivos da rodada
 - GitHub Actions para publicar por push
 
 Arquivo base:
@@ -43,6 +55,9 @@ Secrets esperados no GitHub:
 - `VPS_USER`
 - `VPS_SSH_KEY`
 - `PEPA_DEPLOY_PATH`
+- `PEPA_DATABASE_URL`
+- `PEPA_DATABASE_SSL`
+- `PEPA_DATABASE_SCHEMA`
 
 ## Healthcheck
 

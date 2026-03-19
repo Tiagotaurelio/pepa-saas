@@ -36,6 +36,9 @@ jobs:
             mkdir -p "$DEPLOY_PATH/data"
             cat > "$DEPLOY_PATH/.env" <<'EOF'
             PEPA_DATA_DIR=/app/data
+            PEPA_DATABASE_URL=${{ secrets.PEPA_DATABASE_URL }}
+            PEPA_DATABASE_SSL=${{ secrets.PEPA_DATABASE_SSL }}
+            PEPA_DATABASE_SCHEMA=${{ secrets.PEPA_DATABASE_SCHEMA }}
             EOF
             cd "$DEPLOY_PATH"
             docker build -t pepa-saas:latest .

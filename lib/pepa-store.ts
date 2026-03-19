@@ -57,14 +57,14 @@ type ParsedSupplierFile = {
 
 export async function readPepaSnapshot(tenantId: string, roundId?: string): Promise<PepaSnapshot> {
   if (roundId) {
-    return loadPepaSnapshotByRoundId(tenantId, roundId) ?? getPepaSnapshot();
+    return (await loadPepaSnapshotByRoundId(tenantId, roundId)) ?? getPepaSnapshot();
   }
 
-  return loadLatestPepaSnapshot(tenantId) ?? getPepaSnapshot();
+  return (await loadLatestPepaSnapshot(tenantId)) ?? getPepaSnapshot();
 }
 
 export async function readPepaRounds(tenantId: string): Promise<PepaUploadRoundSummary[]> {
-  return listPepaRounds(tenantId).map((row) => {
+  return (await listPepaRounds(tenantId)).map((row) => {
     const snapshot = JSON.parse(row.snapshot_json) as PepaSnapshot;
     return {
       id: row.id,
@@ -144,7 +144,7 @@ export async function updateComparisonSelection(params: {
     ]
   });
 
-  updatePepaSnapshot({
+  await updatePepaSnapshot({
     roundId: params.roundId,
     tenantId: params.tenantId,
     snapshot: normalizedSnapshot
@@ -191,7 +191,7 @@ export async function updateSupplierCommercialTerms(params: {
     ]
   });
 
-  updatePepaSnapshot({
+  await updatePepaSnapshot({
     roundId: params.roundId,
     tenantId: params.tenantId,
     snapshot: normalizedSnapshot
@@ -231,7 +231,7 @@ export async function updateRoundStatus(params: {
     ]
   };
 
-  updatePepaSnapshot({
+  await updatePepaSnapshot({
     roundId: params.roundId,
     tenantId: params.tenantId,
     snapshot: nextSnapshot
@@ -299,7 +299,7 @@ export async function persistPepaUploadRound(params: {
     }
   };
 
-  savePepaSnapshot({
+  await savePepaSnapshot({
     id: roundId,
     tenantId: params.tenantId,
     createdAt,

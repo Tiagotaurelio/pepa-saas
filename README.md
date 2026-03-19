@@ -53,6 +53,8 @@ Exemplo de resposta:
 - O app usa SQLite em `data/pepa.db`
 - Uploads e anexos ficam no diretorio `data`
 - Em testes, `PEPA_DATA_DIR` isola banco e arquivos
+- Com `PEPA_DATABASE_URL`, o app passa a usar Postgres para sessoes e rodadas
+- `PEPA_DATABASE_SCHEMA` permite isolar o PEPA em um schema proprio, como `pepa`
 
 ## Fluxo demo
 
@@ -111,3 +113,4 @@ CONFIRM_RESTORE=yes sh /opt/apps/homologation/restore-pepa-data.sh /opt/apps/bac
 - O app esta em `Next 16`
 - `lint`, `test` e `build` ja foram validados localmente
 - Existe cobertura automatizada de API, upload, exportacao e UI operacional
+- Em Hostinger/Supabase, prefira string `pooler` e `PEPA_DATABASE_SSL=require`
