@@ -60,6 +60,16 @@ jobs:
             cd "$DEPLOY_PATH"
             docker build -t pepa-saas:latest .
             docker rm -f pepa-saas-hml || true
+            for attempt in $(seq 1 15); do
+              if ! docker ps -a --format '{{.Names}}' | grep -qx 'pepa-saas-hml'; then
+                break
+              fi
+              sleep 1
+            done
+            if docker ps -a --format '{{.Names}}' | grep -qx 'pepa-saas-hml'; then
+              echo "pepa-saas-hml still exists after removal attempt"
+              exit 1
+            fi
             docker run -d \
               --name pepa-saas-hml \
               --restart unless-stopped \
