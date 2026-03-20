@@ -33,6 +33,14 @@ jobs:
           script: |
             set -eu
             DEPLOY_PATH="${{ secrets.PEPA_DEPLOY_PATH }}"
+            REACTIVE_PUBLIC_DOMAIN="${{ secrets.REACTIVE_PUBLIC_DOMAIN }}"
+            PEPA_PUBLIC_DOMAIN="${{ secrets.PEPA_PUBLIC_DOMAIN }}"
+            if [ -z "$REACTIVE_PUBLIC_DOMAIN" ]; then
+              REACTIVE_PUBLIC_DOMAIN="reactive-hml.tavarestech.cloud"
+            fi
+            if [ -z "$PEPA_PUBLIC_DOMAIN" ]; then
+              PEPA_PUBLIC_DOMAIN="pepa-hml.tavarestech.cloud"
+            fi
             mkdir -p "$DEPLOY_PATH/data"
             cat > "$DEPLOY_PATH/.env" <<'EOF'
             PEPA_DATA_DIR=/app/data
@@ -66,28 +74,28 @@ jobs:
             http:
               routers:
                 reactive-http:
-                  rule: Host(\"reactive.tavarestech.cloud\")
+                  rule: Host(\"$REACTIVE_PUBLIC_DOMAIN\")
                   entryPoints:
                     - http
                   middlewares:
                     - redirect-to-https
                   service: reactive-service
                 reactive-https:
-                  rule: Host(\"reactive.tavarestech.cloud\")
+                  rule: Host(\"$REACTIVE_PUBLIC_DOMAIN\")
                   entryPoints:
                     - https
                   tls:
                     certResolver: letsencrypt
                   service: reactive-service
                 pepa-http:
-                  rule: Host(\"pepa.tavarestech.cloud\")
+                  rule: Host(\"$PEPA_PUBLIC_DOMAIN\")
                   entryPoints:
                     - http
                   middlewares:
                     - redirect-to-https
                   service: pepa-service
                 pepa-https:
-                  rule: Host(\"pepa.tavarestech.cloud\")
+                  rule: Host(\"$PEPA_PUBLIC_DOMAIN\")
                   entryPoints:
                     - https
                   tls:
