@@ -16,6 +16,8 @@ export default function CotacoesPepaPage() {
   const { snapshot, isLoading: isLoadingSnapshot, error: snapshotError } = usePepaSnapshot(roundId);
   const workflowTotals = getPepaWorkflowTotals();
   const uploadRef = useRef<HTMLDivElement | null>(null);
+  const mirrorInputRef = useRef<HTMLInputElement | null>(null);
+  const supplierInputRef = useRef<HTMLInputElement | null>(null);
   const [mirrorFile, setMirrorFile] = useState<File | null>(null);
   const [supplierFiles, setSupplierFiles] = useState<File[]>([]);
   const [statusMessage, setStatusMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
@@ -81,7 +83,14 @@ export default function CotacoesPepaPage() {
       body: formData
     });
 
-    const payload = (await response.json()) as { error?: string; snapshot?: { latestRound: { requestedItemsCount: number } | null } };
+    const payload = (await response.json()) as {
+      error?: string;
+      snapshot?: {
+        latestRound: { requestedItemsCount: number; supplierFilesCount: number } | null;
+        diagnostics: { parsedSuppliers: number; ocrSuppliers: number };
+        totals: { attachmentsReceived: number };
+      };
+    };
     if (!response.ok) {
       setStatusMessage({
         tone: "error",
@@ -92,12 +101,32 @@ export default function CotacoesPepaPage() {
     }
 
     const requestedItemsCount = payload.snapshot?.latestRound?.requestedItemsCount ?? 0;
+    const parsedSuppliers = payload.snapshot?.diagnostics?.parsedSuppliers ?? 0;
+    const ocrSuppliers = payload.snapshot?.diagnostics?.ocrSuppliers ?? 0;
+    const supplierFilesCount = payload.snapshot?.latestRound?.supplierFilesCount ?? supplierFiles.length;
+    const attachmentsReceived = payload.snapshot?.totals?.attachmentsReceived ?? supplierFiles.length + (mirrorFile ? 1 : 0);
+    const mirrorWasStructured = requestedItemsCount > 0;
+    const supplierSummary =
+      parsedSuppliers > 0
+        ? `${parsedSuppliers} anexo(s) de fornecedor ja entraram na leitura automatica`
+        : supplierFilesCount > 0
+          ? "os anexos de fornecedor foram salvos, mas ainda nao entraram em leitura automatica"
+          : "nenhum anexo de fornecedor foi associado";
+
     setStatusMessage({
       tone: "success",
-      text: `Rodada salva com sucesso. ${requestedItemsCount} item(ns) foram estruturado(s) a partir do arquivo-base e os anexos de fornecedores ja ficaram vinculados a esta rodada.`
+      text: mirrorWasStructured
+        ? `Rodada salva com sucesso. ${requestedItemsCount} item(ns) foram estruturado(s) a partir do arquivo-base, ${supplierSummary} e ${ocrSuppliers} arquivo(s) ficaram na fila OCR.`
+        : `Rodada salva com sucesso, mas o arquivo-base ainda nao gerou itens estruturados automaticamente. ${attachmentsReceived} arquivo(s) foram vinculados a esta rodada; use CSV, TXT ou XLSX estruturado para montar o comparativo imediato.`
     });
     setMirrorFile(null);
     setSupplierFiles([]);
+    if (mirrorInputRef.current) {
+      mirrorInputRef.current.value = "";
+    }
+    if (supplierInputRef.current) {
+      supplierInputRef.current.value = "";
+    }
     window.dispatchEvent(new Event("pepa-store-updated"));
     setIsSubmitting(false);
   }
@@ -240,6 +269,7 @@ export default function CotacoesPepaPage() {
                 CSV, TXT ou XLSX com SKU, descricao e quantidade. Outros formatos ainda ficam salvos, mas sem leitura automatica dos itens.
               </span>
               <input
+                ref={mirrorInputRef}
                 className="mt-4 block w-full text-sm text-slate-600"
                 type="file"
                 accept=".csv,.txt,.xlsx,.xls,.pdf"
@@ -253,6 +283,7 @@ export default function CotacoesPepaPage() {
                 Pode enviar varios arquivos de uma vez. CSV, TXT e XLSX entram no parser tabular; PDFs seguem para OCR. Limite atual: 20 anexos e 10 MB por arquivo.
               </span>
               <input
+                ref={supplierInputRef}
                 className="mt-4 block w-full text-sm text-slate-600"
                 type="file"
                 multiple
