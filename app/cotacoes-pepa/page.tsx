@@ -87,7 +87,7 @@ export default function CotacoesPepaPage() {
       error?: string;
       snapshot?: {
         latestRound: { requestedItemsCount: number; supplierFilesCount: number } | null;
-        diagnostics: { parsedSuppliers: number; ocrSuppliers: number };
+        diagnostics: { parsedSuppliers: number; ocrSuppliers: number; manualReviewSuppliers: number; mirrorStructured: boolean; mirrorFormat: string | null; storedForReviewAttachments: number };
         totals: { attachmentsReceived: number };
       };
     };
@@ -103,9 +103,11 @@ export default function CotacoesPepaPage() {
     const requestedItemsCount = payload.snapshot?.latestRound?.requestedItemsCount ?? 0;
     const parsedSuppliers = payload.snapshot?.diagnostics?.parsedSuppliers ?? 0;
     const ocrSuppliers = payload.snapshot?.diagnostics?.ocrSuppliers ?? 0;
+    const manualReviewSuppliers = payload.snapshot?.diagnostics?.manualReviewSuppliers ?? 0;
     const supplierFilesCount = payload.snapshot?.latestRound?.supplierFilesCount ?? supplierFiles.length;
     const attachmentsReceived = payload.snapshot?.totals?.attachmentsReceived ?? supplierFiles.length + (mirrorFile ? 1 : 0);
     const mirrorWasStructured = requestedItemsCount > 0;
+    const storedForReviewAttachments = payload.snapshot?.diagnostics?.storedForReviewAttachments ?? 0;
     const supplierSummary =
       parsedSuppliers > 0
         ? `${parsedSuppliers} anexo(s) de fornecedor ja entraram na leitura automatica`
@@ -116,8 +118,8 @@ export default function CotacoesPepaPage() {
     setStatusMessage({
       tone: "success",
       text: mirrorWasStructured
-        ? `Rodada salva com sucesso. ${requestedItemsCount} item(ns) foram estruturado(s) a partir do arquivo-base, ${supplierSummary} e ${ocrSuppliers} arquivo(s) ficaram na fila OCR.`
-        : `Rodada salva com sucesso, mas o arquivo-base ainda nao gerou itens estruturados automaticamente. ${attachmentsReceived} arquivo(s) foram vinculados a esta rodada; use CSV, TXT ou XLSX estruturado para montar o comparativo imediato.`
+        ? `Rodada salva com sucesso. ${requestedItemsCount} item(ns) foram estruturado(s) a partir do arquivo-base, ${supplierSummary}, ${ocrSuppliers} arquivo(s) ficaram na fila OCR e ${manualReviewSuppliers} ficaram apenas para revisao manual.`
+        : `Rodada salva com sucesso, mas o arquivo-base ainda nao gerou itens estruturados automaticamente. ${attachmentsReceived} arquivo(s) foram vinculados a esta rodada; ${storedForReviewAttachments} arquivo(s) ficaram apenas para revisao manual e o comparativo imediato continua dependendo de CSV, TXT ou XLSX estruturado.`
     });
     setMirrorFile(null);
     setSupplierFiles([]);
@@ -259,14 +261,14 @@ export default function CotacoesPepaPage() {
           <p className="text-sm text-slate-500">Rodada real</p>
           <h3 className="mt-1 text-2xl font-semibold">Suba o espelho do Flex e os anexos juntos</h3>
           <p className="mt-3 text-sm leading-6 text-slate-500">
-            Nesta primeira iteracao, o sistema salva os arquivos recebidos, reconhece o arquivo-base quando ele vem em CSV, TXT ou XLSX estruturado e tenta reconciliar anexos tabulares dos fornecedores antes de mandar o restante para OCR.
+            O sistema aceita arquivos mistos, mas nao trata tudo do mesmo jeito: CSV, TXT e XLSX entram no comparativo imediato; PDFs tentam leitura e podem cair em OCR; outros formatos ficam salvos para revisao manual sem prometer reconciliacao automatica.
           </p>
 
           <div className="mt-6 grid gap-4">
             <label className="rounded-[28px] border border-dashed border-brand-blue/30 bg-brand-surface p-5">
               <span className="block text-sm font-medium text-brand-ink">Arquivo-base do Flex</span>
               <span className="mt-2 block text-sm text-slate-500">
-                CSV, TXT ou XLSX com SKU, descricao e quantidade. Outros formatos ainda ficam salvos, mas sem leitura automatica dos itens.
+                CSV, TXT ou XLSX com SKU, descricao e quantidade geram comparativo imediato. PDF pode ser salvo e tentar leitura; outros formatos ficam apenas para revisao manual.
               </span>
               <input
                 ref={mirrorInputRef}
@@ -280,7 +282,7 @@ export default function CotacoesPepaPage() {
             <label className="rounded-[28px] border border-dashed border-brand-blue/30 bg-brand-surface p-5">
               <span className="block text-sm font-medium text-brand-ink">Anexos dos fornecedores</span>
               <span className="mt-2 block text-sm text-slate-500">
-                Pode enviar varios arquivos de uma vez. CSV, TXT e XLSX entram no parser tabular; PDFs seguem para OCR. Limite atual: 20 anexos e 10 MB por arquivo.
+                Pode enviar varios arquivos de uma vez. CSV, TXT e XLSX entram no parser tabular; PDFs tentam leitura e podem seguir para OCR; outros formatos ficam salvos para revisao manual. Limite atual: 20 anexos e 10 MB por arquivo.
               </span>
               <input
                 ref={supplierInputRef}
@@ -297,6 +299,16 @@ export default function CotacoesPepaPage() {
             <SummaryCard label="Arquivo-base" value={mirrorFile?.name ?? "Nao selecionado"} />
             <SummaryCard label="Anexos de fornecedor" value={String(supplierFiles.length)} />
           </div>
+
+          {mirrorFile || supplierFiles.length > 0 ? (
+            <div className="mt-4">
+              <OperationFeedback
+                tone={buildUploadPreviewTone(mirrorFile, supplierFiles)}
+                title="Leitura prevista desta rodada"
+                message={buildUploadPreviewMessage(mirrorFile, supplierFiles)}
+              />
+            </div>
+          ) : null}
 
           <button
             className="mt-6 rounded-full bg-brand-blue px-5 py-3 text-sm font-medium text-white shadow-panel disabled:cursor-not-allowed disabled:opacity-50"
@@ -386,6 +398,11 @@ export default function CotacoesPepaPage() {
               detail="PDFs escaneados ou sem parser"
             />
             <MetricCard
+              label="Revisao manual"
+              value={String(snapshot.diagnostics?.storedForReviewAttachments ?? 0)}
+              detail="Formatos salvos sem parser automatico"
+            />
+            <MetricCard
               label="Itens estruturados"
               value={`${snapshot.totals.quotedItems}/${snapshot.totals.requestedItems}`}
               detail="Cobertura atual do comparativo"
@@ -407,9 +424,10 @@ export default function CotacoesPepaPage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-3">
+        <div className="mt-6 grid gap-4 md:grid-cols-4">
           <MetricCard label="Fornecedores lidos" value={String(snapshot.diagnostics?.parsedSuppliers ?? 0)} detail="Entraram no parser atual" />
           <MetricCard label="Fila OCR" value={String(snapshot.diagnostics?.ocrSuppliers ?? 0)} detail="Ainda dependem de OCR" />
+          <MetricCard label="Revisao manual" value={String(snapshot.diagnostics?.manualReviewSuppliers ?? 0)} detail="Nao entram no parser atual" />
           <MetricCard label="Termos detectados" value={String(snapshot.diagnostics?.commercialTermsDetected ?? 0)} detail="Pagamento + frete completos" />
         </div>
 
@@ -693,7 +711,7 @@ function renderDiff(rounds: PepaUploadRoundSummary[], roundId: string) {
   );
 }
 
-function attachmentStatusLabel(status: "parsed" | "ocr-required" | "template-pending"): string {
+function attachmentStatusLabel(status: "parsed" | "ocr-required" | "template-pending" | "manual-review"): string {
   if (status === "parsed") {
     return "Lido";
   }
@@ -702,16 +720,24 @@ function attachmentStatusLabel(status: "parsed" | "ocr-required" | "template-pen
     return "OCR";
   }
 
+  if (status === "manual-review") {
+    return "Revisao manual";
+  }
+
   return "Parser pendente";
 }
 
-function attachmentStatusClasses(status: "parsed" | "ocr-required" | "template-pending") {
+function attachmentStatusClasses(status: "parsed" | "ocr-required" | "template-pending" | "manual-review") {
   if (status === "parsed") {
     return "rounded-full bg-brand-success/10 px-3 py-1 text-xs font-semibold text-brand-success";
   }
 
   if (status === "ocr-required") {
     return "rounded-full bg-brand-attention/10 px-3 py-1 text-xs font-semibold text-brand-attention";
+  }
+
+  if (status === "manual-review") {
+    return "rounded-full bg-slate-900/10 px-3 py-1 text-xs font-semibold text-slate-700";
   }
 
   return "rounded-full bg-slate-200 px-3 py-1 text-xs font-semibold text-slate-600";
@@ -723,4 +749,55 @@ function comparisonStatusClasses(status: "quoted" | "ocr-pending") {
   }
 
   return "inline-flex rounded-full bg-brand-attention/10 px-3 py-1 text-xs font-semibold text-brand-attention";
+}
+
+function detectSelectedFormat(file: File): "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other" {
+  const lowerName = file.name.toLowerCase();
+  if (lowerName.endsWith(".csv")) return "csv";
+  if (lowerName.endsWith(".txt")) return "txt";
+  if (lowerName.endsWith(".xlsx")) return "xlsx";
+  if (lowerName.endsWith(".xls")) return "xls";
+  if (lowerName.endsWith(".pdf")) return "pdf";
+  return "other";
+}
+
+function describeSelectedFile(file: File, role: "mirror" | "supplier"): string {
+  const format = detectSelectedFormat(file);
+  if (format === "csv" || format === "txt" || format === "xlsx" || format === "xls") {
+    return role === "mirror"
+      ? `${file.name}: deve gerar comparativo imediato se vier com SKU, descricao e quantidade.`
+      : `${file.name}: entra no parser tabular e pode reconciliar itens automaticamente.`;
+  }
+
+  if (format === "pdf") {
+    return role === "mirror"
+      ? `${file.name}: sera salvo e o PDF tentara leitura, mas comparativo imediato nao e garantido.`
+      : `${file.name}: tentara leitura textual; se nao estruturar, vai para OCR.`;
+  }
+
+  return `${file.name}: sera salvo apenas para revisao manual porque este formato ainda nao entra no parser automatico.`;
+}
+
+function buildUploadPreviewTone(mirrorFile: File | null, supplierFiles: File[]): "success" | "warning" | "info" {
+  const selectedFiles = [mirrorFile, ...supplierFiles].filter((file): file is File => file instanceof File);
+  const hasManualReview = selectedFiles.some((file) => detectSelectedFormat(file) === "other");
+  const mirrorNeedsCare = mirrorFile ? detectSelectedFormat(mirrorFile) === "pdf" || detectSelectedFormat(mirrorFile) === "other" : false;
+  return hasManualReview || mirrorNeedsCare ? "warning" : "info";
+}
+
+function buildUploadPreviewMessage(mirrorFile: File | null, supplierFiles: File[]): string {
+  const lines: string[] = [];
+  if (mirrorFile) {
+    lines.push(describeSelectedFile(mirrorFile, "mirror"));
+  }
+  if (supplierFiles.length > 0) {
+    lines.push(
+      ...supplierFiles.slice(0, 3).map((file) => describeSelectedFile(file, "supplier"))
+    );
+    if (supplierFiles.length > 3) {
+      lines.push(`Mais ${supplierFiles.length - 3} anexo(s) seguem a mesma regra por formato.`);
+    }
+  }
+
+  return lines.join(" ");
 }

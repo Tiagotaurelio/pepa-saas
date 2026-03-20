@@ -2,8 +2,10 @@ export type PepaAttachment = {
   fileName: string;
   role: "mirror" | "supplier-quote";
   supplierName: string | null;
-  extractionStatus: "parsed" | "ocr-required" | "template-pending";
+  extractionStatus: "parsed" | "ocr-required" | "template-pending" | "manual-review";
   notes: string;
+  detectedFormat?: "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other";
+  processingMode?: "immediate-comparison" | "ocr-queue" | "stored-for-review";
   storageProvider?: "local" | "s3";
   storageKey?: string | null;
   storageUrl?: string | null;
@@ -20,10 +22,11 @@ export type RequestedItem = {
 export type SupplierOffer = {
   supplierName: string;
   sourceFile: string;
-  extractionStatus: "parsed" | "ocr-required";
+  extractionStatus: "parsed" | "ocr-required" | "manual-review";
   paymentTerms: string;
   freightTerms: string;
   quoteDate: string | null;
+  detectedFormat?: "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other";
   coverageCount: number;
   quotedItemsCount: number;
   totalValue: number | null;
@@ -73,7 +76,11 @@ export type PepaSnapshot = {
 export type PepaRoundDiagnostics = {
   parsedSuppliers: number;
   ocrSuppliers: number;
+  manualReviewSuppliers: number;
   commercialTermsDetected: number;
+  mirrorStructured: boolean;
+  mirrorFormat: "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other" | null;
+  storedForReviewAttachments: number;
   warnings: string[];
 };
 
@@ -282,6 +289,8 @@ export function getPepaSnapshot(): PepaSnapshot {
       role: "mirror",
       supplierName: null,
       extractionStatus: "template-pending",
+      detectedFormat: "pdf",
+      processingMode: "stored-for-review",
       notes:
         "Arquivo exportado do Flex que deve se tornar a referencia principal de sequencia, itens e quantidades."
     },
@@ -290,6 +299,8 @@ export function getPepaSnapshot(): PepaSnapshot {
       role: "supplier-quote",
       supplierName: "Irimar",
       extractionStatus: "parsed",
+      detectedFormat: "pdf",
+      processingMode: "immediate-comparison",
       notes:
         "Resposta de fornecedor com texto nativo. O comparativo precisa reorganizar este retorno para a mesma sequencia do arquivo-base."
     },
@@ -298,6 +309,8 @@ export function getPepaSnapshot(): PepaSnapshot {
       role: "supplier-quote",
       supplierName: "Fornecedor 20409",
       extractionStatus: "ocr-required",
+      detectedFormat: "pdf",
+      processingMode: "ocr-queue",
       notes:
         "Arquivo sem texto extraivel no ambiente atual. Deve entrar na fila OCR antes de ser reorganizado na ordem do arquivo-base."
     },
@@ -306,6 +319,8 @@ export function getPepaSnapshot(): PepaSnapshot {
       role: "supplier-quote",
       supplierName: "Fornecedor 2113",
       extractionStatus: "ocr-required",
+      detectedFormat: "pdf",
+      processingMode: "ocr-queue",
       notes:
         "Anexo com aparencia de imagem ou PDF escaneado. Requer OCR antes da comparacao automatica."
     }
@@ -316,6 +331,7 @@ export function getPepaSnapshot(): PepaSnapshot {
       supplierName: "Irimar",
       sourceFile: "Pepa Distr de Mat Elet e de Const Ltda 825918.pdf",
       extractionStatus: "parsed",
+      detectedFormat: "pdf",
       paymentTerms: "21/28/35/42/49 dias",
       freightTerms: "CIF, 3% da metragem",
       quoteDate: "2026-03-13",
@@ -332,6 +348,7 @@ export function getPepaSnapshot(): PepaSnapshot {
       supplierName: "Fornecedor 20409",
       sourceFile: "20409.pdf",
       extractionStatus: "ocr-required",
+      detectedFormat: "pdf",
       paymentTerms: "Nao lido",
       freightTerms: "Nao lido",
       quoteDate: null,
@@ -346,6 +363,7 @@ export function getPepaSnapshot(): PepaSnapshot {
       supplierName: "Fornecedor 2113",
       sourceFile: "2113.pdf",
       extractionStatus: "ocr-required",
+      detectedFormat: "pdf",
       paymentTerms: "Nao lido",
       freightTerms: "Nao lido",
       quoteDate: null,
@@ -375,10 +393,15 @@ export function getPepaSnapshot(): PepaSnapshot {
     diagnostics: {
       parsedSuppliers: 1,
       ocrSuppliers: 2,
+      manualReviewSuppliers: 0,
       commercialTermsDetected: 1,
+      mirrorStructured: false,
+      mirrorFormat: "pdf",
+      storedForReviewAttachments: 1,
       warnings: [
         "2 anexos ainda dependem de OCR para entrar no comparativo.",
-        "Somente 1 fornecedor possui condicoes comerciais completas no dataset piloto."
+        "Somente 1 fornecedor possui condicoes comerciais completas no dataset piloto.",
+        "O arquivo-base piloto esta em PDF e nao gera comparativo imediato sem estrutura tabular suficiente."
       ]
     },
     totals: {

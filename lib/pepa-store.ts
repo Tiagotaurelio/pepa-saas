@@ -39,6 +39,15 @@ type ParsedTable = {
   rows: string[][];
 };
 
+type DetectedFileFormat = "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other";
+
+type FileCapability = {
+  detectedFormat: DetectedFileFormat;
+  canUseTabularParser: boolean;
+  canUseOcrFallback: boolean;
+  recommendedProcessingMode: "immediate-comparison" | "ocr-queue" | "stored-for-review";
+};
+
 type SupplierQuoteRow = {
   sku: string;
   description: string;
@@ -49,7 +58,8 @@ type SupplierQuoteRow = {
 type ParsedSupplierFile = {
   supplierName: string;
   sourceFile: string;
-  extractionStatus: "parsed" | "ocr-required";
+  extractionStatus: "parsed" | "ocr-required" | "manual-review";
+  detectedFormat: DetectedFileFormat;
   quotedItems: SupplierQuoteRow[];
   paymentTerms: string;
   freightTerms: string;
@@ -264,6 +274,7 @@ export async function persistPepaUploadRound(params: {
 
   const requestedItems = await extractRequestedItemsFromMirror(params.mirrorFile);
   const parsedSupplierFiles = await Promise.all(params.supplierFiles.map(parseSupplierFile));
+  const mirrorCapability = classifyUploadFile(params.mirrorFile);
   const attachments = buildAttachments(params.mirrorFile, parsedSupplierFiles, requestedItems.length, storedUploads);
   const comparisonRows = buildComparisonRows(requestedItems, parsedSupplierFiles);
   const suppliers = buildSuppliers(parsedSupplierFiles, comparisonRows);
@@ -271,6 +282,7 @@ export async function persistPepaUploadRound(params: {
   const quotedValue = roundCurrency(
     comparisonRows.reduce((total, row) => total + (row.bestTotal ?? 0), 0)
   );
+  const diagnostics = buildDiagnostics(parsedSupplierFiles, mirrorCapability, requestedItems.length, attachments);
 
   const snapshot: PepaSnapshot = {
     latestRound: {
@@ -287,7 +299,7 @@ export async function persistPepaUploadRound(params: {
     attachments,
     suppliers,
     comparisonRows,
-    diagnostics: buildDiagnostics(parsedSupplierFiles),
+    diagnostics,
     auditEvents: [
       createAuditEvent(
         "round_uploaded",
@@ -325,15 +337,26 @@ function buildAttachments(
   storedUploads: Map<string, StoredUploadMeta>
 ): PepaAttachment[] {
   const mirrorStored = storedUploads.get(mirrorFile.name);
+  const mirrorCapability = classifyUploadFile(mirrorFile);
   const mirrorParsed = requestedItemsCount > 0;
   const mirrorAttachment: PepaAttachment = {
     fileName: mirrorFile.name,
     role: "mirror",
     supplierName: null,
-    extractionStatus: mirrorParsed ? "parsed" : "template-pending",
+    extractionStatus: mirrorParsed
+      ? "parsed"
+      : mirrorCapability.recommendedProcessingMode === "stored-for-review"
+        ? "manual-review"
+        : "template-pending",
+    detectedFormat: mirrorCapability.detectedFormat,
+    processingMode: mirrorParsed ? "immediate-comparison" : mirrorCapability.recommendedProcessingMode,
     notes: mirrorParsed
       ? `Arquivo-base salvo em ${describeStorage(mirrorStored)} e lido com ${requestedItemsCount} item(ns) estruturado(s) para o comparativo.`
-      : `Arquivo-base salvo em ${describeStorage(mirrorStored)}, mas sem colunas suficientes para estruturar os itens automaticamente.`,
+      : mirrorCapability.detectedFormat === "pdf"
+        ? `Arquivo-base salvo em ${describeStorage(mirrorStored)}, mas o PDF nao trouxe colunas suficientes para estruturar os itens automaticamente.`
+        : mirrorCapability.recommendedProcessingMode === "stored-for-review"
+          ? `Arquivo-base salvo em ${describeStorage(mirrorStored)} somente para revisao manual. Este formato ainda nao monta comparativo imediato.`
+          : `Arquivo-base salvo em ${describeStorage(mirrorStored)}, mas sem colunas suficientes para estruturar os itens automaticamente.`,
     storageProvider: mirrorStored?.storageProvider,
     storageKey: mirrorStored?.storageKey ?? null,
     storageUrl: mirrorStored?.storageUrl ?? null
@@ -346,10 +369,14 @@ function buildAttachments(
       fileName: file.sourceFile,
       role: "supplier-quote",
       supplierName: file.supplierName,
-      extractionStatus: parsed ? "parsed" : "ocr-required",
+      extractionStatus: parsed ? "parsed" : file.extractionStatus,
+      detectedFormat: file.detectedFormat,
+      processingMode: parsed ? "immediate-comparison" : file.extractionStatus === "ocr-required" ? "ocr-queue" : "stored-for-review",
       notes: parsed
         ? `Arquivo salvo em ${describeStorage(stored)}. ${file.quotedItems.length} item(ns) de cotacao foram reconhecidos para reconciliacao automatica.`
-        : `Arquivo salvo em ${describeStorage(stored)} e encaminhado para fila OCR antes da reconciliacao automatica dos itens.`,
+        : file.extractionStatus === "ocr-required"
+          ? `Arquivo salvo em ${describeStorage(stored)} e encaminhado para fila OCR antes da reconciliacao automatica dos itens.`
+          : `Arquivo salvo em ${describeStorage(stored)} apenas para revisao manual. Este formato ainda nao entra no parser automatico nem na fila OCR atual.`,
       storageProvider: stored?.storageProvider,
       storageKey: stored?.storageKey ?? null,
       storageUrl: stored?.storageUrl ?? null
@@ -377,7 +404,8 @@ function buildSuppliers(
     return {
       supplierName: file.supplierName,
       sourceFile: file.sourceFile,
-      extractionStatus: parsed ? "parsed" : "ocr-required",
+      extractionStatus: parsed ? "parsed" : file.extractionStatus,
+      detectedFormat: file.detectedFormat,
       paymentTerms: file.paymentTerms,
       freightTerms: file.freightTerms,
       quoteDate: file.quoteDate,
@@ -387,7 +415,9 @@ function buildSuppliers(
       averageUnitPrice,
       notes: parsed
         ? `Arquivo estruturado recebido e reconciliado com ${matchedRows.length} item(ns) do espelho.`
-        : "Arquivo recebido, mas ainda depende de OCR ou parser especifico para entrar no ranking."
+        : file.extractionStatus === "ocr-required"
+          ? "Arquivo recebido, mas ainda depende de OCR ou parser especifico para entrar no ranking."
+          : "Arquivo recebido e salvo, mas este formato ainda exige revisao manual antes de entrar no ranking."
     };
   });
 }
@@ -434,6 +464,11 @@ function buildComparisonRows(
 }
 
 async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<RequestedItem[]> {
+  const capability = classifyUploadFile(file);
+  if (!capability.canUseTabularParser) {
+    return [];
+  }
+
   const table = await parseTabularFile(file);
   if (!table || table.rows.length === 0) {
     return [];
@@ -461,13 +496,28 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
 
 async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierFile> {
   const supplierName = inferSupplierName(file.name);
+  const capability = classifyUploadFile(file);
+  if (!capability.canUseTabularParser) {
+    return {
+      supplierName,
+      sourceFile: file.name,
+      extractionStatus: capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      detectedFormat: capability.detectedFormat,
+      quotedItems: [],
+      paymentTerms: "Nao lido",
+      freightTerms: "Nao lido",
+      quoteDate: null
+    };
+  }
+
   const table = await parseTabularFile(file);
 
   if (!table || table.rows.length === 0) {
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus: "ocr-required",
+      extractionStatus: capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      detectedFormat: capability.detectedFormat,
       quotedItems: [],
       paymentTerms: "Nao lido",
       freightTerms: "Nao lido",
@@ -490,7 +540,8 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus: "ocr-required",
+      extractionStatus: capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      detectedFormat: capability.detectedFormat,
       quotedItems: [],
       paymentTerms: extractPaymentTerms(table),
       freightTerms: extractFreightTerms(table),
@@ -515,7 +566,8 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   return {
     supplierName,
     sourceFile: file.name,
-    extractionStatus: quotedItems.length > 0 ? "parsed" : "ocr-required",
+    extractionStatus: quotedItems.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+    detectedFormat: capability.detectedFormat,
     quotedItems,
     paymentTerms: extractPaymentTerms(table),
     freightTerms: extractFreightTerms(table),
@@ -743,6 +795,54 @@ function isStructuredTextFile(fileName: string, mimeType: string) {
   );
 }
 
+function detectFileFormat(fileName: string): DetectedFileFormat {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith(".csv")) {
+    return "csv";
+  }
+  if (lowerName.endsWith(".txt")) {
+    return "txt";
+  }
+  if (lowerName.endsWith(".xlsx")) {
+    return "xlsx";
+  }
+  if (lowerName.endsWith(".xls")) {
+    return "xls";
+  }
+  if (lowerName.endsWith(".pdf")) {
+    return "pdf";
+  }
+  return "other";
+}
+
+function classifyUploadFile(file: UploadFileInput): FileCapability {
+  const detectedFormat = detectFileFormat(file.name);
+  if (detectedFormat === "csv" || detectedFormat === "txt" || detectedFormat === "xlsx" || detectedFormat === "xls") {
+    return {
+      detectedFormat,
+      canUseTabularParser: true,
+      canUseOcrFallback: false,
+      recommendedProcessingMode: "immediate-comparison"
+    };
+  }
+
+  if (detectedFormat === "pdf") {
+    return {
+      detectedFormat,
+      canUseTabularParser: true,
+      canUseOcrFallback: true,
+      recommendedProcessingMode: "ocr-queue"
+    };
+  }
+
+  return {
+    detectedFormat,
+    canUseTabularParser: false,
+    canUseOcrFallback: false,
+    recommendedProcessingMode: "stored-for-review"
+  };
+}
+
 function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
   const quoteSku = normalizeComparable(quote.sku);
   const itemSku = normalizeComparable(item.sku);
@@ -820,9 +920,15 @@ function recalculateSnapshot(snapshot: PepaSnapshot): PepaSnapshot {
   };
 }
 
-function buildDiagnostics(supplierFiles: ParsedSupplierFile[]) {
+function buildDiagnostics(
+  supplierFiles: ParsedSupplierFile[],
+  mirrorCapability: FileCapability,
+  requestedItemsCount: number,
+  attachments: PepaAttachment[]
+) {
   const parsedSuppliers = supplierFiles.filter((file) => file.extractionStatus === "parsed").length;
   const ocrSuppliers = supplierFiles.filter((file) => file.extractionStatus === "ocr-required").length;
+  const manualReviewSuppliers = supplierFiles.filter((file) => file.extractionStatus === "manual-review").length;
   const commercialTermsDetected = supplierFiles.filter(
     (file) =>
       file.paymentTerms !== "Nao lido" &&
@@ -836,14 +942,34 @@ function buildDiagnostics(supplierFiles: ParsedSupplierFile[]) {
     warnings.push(`${ocrSuppliers} anexo(s) ainda dependem de OCR ou parser adicional.`);
   }
 
+  if (manualReviewSuppliers > 0) {
+    warnings.push(`${manualReviewSuppliers} anexo(s) ficaram salvos apenas para revisao manual porque o formato ainda nao entra no parser nem na fila OCR atual.`);
+  }
+
   if (commercialTermsDetected < supplierFiles.length) {
     warnings.push("Nem todos os fornecedores trouxeram condicoes comerciais completas na leitura atual.");
   }
 
+  if (requestedItemsCount === 0) {
+    if (mirrorCapability.detectedFormat === "pdf") {
+      warnings.push("O arquivo-base em PDF foi salvo, mas ainda nao trouxe estrutura suficiente para montar comparativo imediato.");
+    } else if (mirrorCapability.recommendedProcessingMode === "stored-for-review") {
+      warnings.push("O arquivo-base foi salvo apenas para revisao manual porque este formato ainda nao gera comparativo imediato.");
+    } else {
+      warnings.push("O arquivo-base foi lido, mas nao trouxe colunas minimas de SKU, descricao e quantidade para gerar o comparativo.");
+    }
+  }
+
+  const storedForReviewAttachments = attachments.filter((attachment) => attachment.processingMode === "stored-for-review").length;
+
   return {
     parsedSuppliers,
     ocrSuppliers,
+    manualReviewSuppliers,
     commercialTermsDetected,
+    mirrorStructured: requestedItemsCount > 0,
+    mirrorFormat: mirrorCapability.detectedFormat,
+    storedForReviewAttachments,
     warnings
   };
 }

@@ -241,4 +241,75 @@ describe("PEPA upload integration", () => {
     expect(reloadedSheet?.getCell("G2").value).toBe("ready");
     expect(reloadedSheet?.rowCount).toBe(4);
   });
+
+  it("classifies mixed-format uploads honestly across parser, OCR and manual review", async () => {
+    const tenantId = "tenant-mixed";
+    const mirrorCsv = [
+      "sku,descricao,unidade,quantidade",
+      "SKU-010,Cabo Flex 10mm Azul,ROLO,30"
+    ].join("\n");
+    const supplierCsv = [
+      "sku,descricao,preco_unitario,valor_total,pagamento,frete,data_cotacao",
+      "SKU-010,Cabo Flex 10mm Azul,9.90,297.00,21 dias,CIF,2026-03-20"
+    ].join("\n");
+    const supplierPdfText = [
+      "sku  descricao  preco_unitario  valor_total",
+      "SKU-010  Cabo Flex 10mm Azul  10.15  304.50"
+    ].join("\n");
+
+    const snapshot = await persistPepaUploadRound({
+      tenantId,
+      mirrorFile: {
+        name: "mirror-mixed.csv",
+        type: "text/csv",
+        buffer: Buffer.from(mirrorCsv)
+      },
+      supplierFiles: [
+        {
+          name: "fornecedor-tabular.csv",
+          type: "text/csv",
+          buffer: Buffer.from(supplierCsv)
+        },
+        {
+          name: "fornecedor-pdf.pdf",
+          type: "application/pdf",
+          buffer: Buffer.from(supplierPdfText)
+        },
+        {
+          name: "fornecedor-catalogo.docx",
+          type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          buffer: Buffer.from("catalogo")
+        }
+      ]
+    });
+
+    expect(snapshot.diagnostics).toMatchObject({
+      parsedSuppliers: 1,
+      ocrSuppliers: 1,
+      manualReviewSuppliers: 1,
+      mirrorStructured: true,
+      mirrorFormat: "csv",
+      storedForReviewAttachments: 1
+    });
+
+    const manualAttachment = snapshot.attachments.find((attachment) => attachment.fileName === "fornecedor-catalogo.docx");
+    expect(manualAttachment).toMatchObject({
+      extractionStatus: "manual-review",
+      processingMode: "stored-for-review",
+      detectedFormat: "other"
+    });
+
+    const parsedPdfAttachment = snapshot.attachments.find((attachment) => attachment.fileName === "fornecedor-pdf.pdf");
+    expect(parsedPdfAttachment).toMatchObject({
+      extractionStatus: "ocr-required",
+      processingMode: "ocr-queue",
+      detectedFormat: "pdf"
+    });
+
+    const manualSupplier = snapshot.suppliers.find((supplier) => supplier.sourceFile === "fornecedor-catalogo.docx");
+    expect(manualSupplier).toMatchObject({
+      extractionStatus: "manual-review",
+      detectedFormat: "other"
+    });
+  });
 });

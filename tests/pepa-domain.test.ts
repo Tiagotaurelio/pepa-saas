@@ -78,6 +78,16 @@ function createSnapshot(): PepaSnapshot {
       }
     ],
     auditEvents: [],
+    diagnostics: {
+      parsedSuppliers: 1,
+      ocrSuppliers: 1,
+      manualReviewSuppliers: 0,
+      commercialTermsDetected: 1,
+      mirrorStructured: true,
+      mirrorFormat: "xlsx",
+      storedForReviewAttachments: 0,
+      warnings: []
+    },
     totals: {
       attachmentsReceived: 3,
       parsedAttachments: 1,
