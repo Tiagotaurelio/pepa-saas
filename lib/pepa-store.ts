@@ -37,6 +37,7 @@ type UploadFileInput = {
 type ParsedTable = {
   headers: string[];
   rows: string[][];
+  rawLines: string[];
 };
 
 type DetectedFileFormat = "csv" | "txt" | "xlsx" | "xls" | "pdf" | "other";
@@ -470,8 +471,8 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
   }
 
   const table = await parseTabularFile(file);
-  if (!table || table.rows.length === 0) {
-    return [];
+  if (!table) {
+    return inferRequestedItemsFromLines(await extractTextLines(file));
   }
 
   const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item"]);
@@ -480,7 +481,7 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
   const quantityIndex = findHeaderIndex(table.headers, ["quantidade", "qtd", "qtde"]);
 
   if (skuIndex < 0 || descriptionIndex < 0 || quantityIndex < 0) {
-    return [];
+    return inferRequestedItemsFromRows(table.rows, table.rawLines);
   }
 
   return table.rows
@@ -512,13 +513,15 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
 
   const table = await parseTabularFile(file);
 
-  if (!table || table.rows.length === 0) {
+  if (!table) {
+    const inferredQuotes = inferSupplierQuoteRowsFromLines(await extractTextLines(file));
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus: capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      extractionStatus:
+        inferredQuotes.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
       detectedFormat: capability.detectedFormat,
-      quotedItems: [],
+      quotedItems: inferredQuotes,
       paymentTerms: "Nao lido",
       freightTerms: "Nao lido",
       quoteDate: null
@@ -537,12 +540,14 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total"]);
 
   if ((skuIndex < 0 && descriptionIndex < 0) || unitPriceIndex < 0) {
+    const inferredQuotes = inferSupplierQuoteRowsFromRows(table.rows, table.rawLines);
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus: capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      extractionStatus:
+        inferredQuotes.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
       detectedFormat: capability.detectedFormat,
-      quotedItems: [],
+      quotedItems: inferredQuotes,
       paymentTerms: extractPaymentTerms(table),
       freightTerms: extractFreightTerms(table),
       quoteDate: extractQuoteDate(table)
@@ -606,7 +611,8 @@ async function parseTabularFile(file: UploadFileInput): Promise<ParsedTable | nu
 
     return {
       headers: rows[0],
-      rows: rows.slice(1)
+      rows: rows.slice(1),
+      rawLines: rows.map((row) => row.join("  "))
     };
   }
 
@@ -632,7 +638,8 @@ async function parseTabularFile(file: UploadFileInput): Promise<ParsedTable | nu
 
       return {
         headers: rowCandidates[0],
-        rows: rowCandidates.slice(1)
+        rows: rowCandidates.slice(1),
+        rawLines: lines
       };
     } catch {
       return null;
@@ -652,7 +659,8 @@ async function parseTabularFile(file: UploadFileInput): Promise<ParsedTable | nu
 
     return {
       headers: parseDelimitedLine(lines[0]),
-      rows: lines.slice(1).map((line) => parseDelimitedLine(line))
+      rows: lines.slice(1).map((line) => parseDelimitedLine(line)),
+      rawLines: lines
     };
   }
 
@@ -664,7 +672,7 @@ function findHeaderIndex(headers: string[], aliases: string[]) {
 }
 
 function parseDelimitedLine(line: string): string[] {
-  const delimiter = line.includes(";") ? ";" : ",";
+  const delimiter = line.includes("\t") ? "\t" : line.includes(";") ? ";" : line.includes("|") ? "|" : ",";
   return line.split(delimiter).map((part) => part.trim());
 }
 
@@ -791,7 +799,8 @@ function isStructuredTextFile(fileName: string, mimeType: string) {
   return (
     mimeType.startsWith("text/") ||
     lowerName.endsWith(".csv") ||
-    lowerName.endsWith(".txt")
+    lowerName.endsWith(".txt") ||
+    lowerName.endsWith(".tsv")
   );
 }
 
@@ -813,6 +822,268 @@ function detectFileFormat(fileName: string): DetectedFileFormat {
     return "pdf";
   }
   return "other";
+}
+
+async function extractTextLines(file: UploadFileInput): Promise<string[]> {
+  const lowerName = file.name.toLowerCase();
+
+  if (lowerName.endsWith(".pdf")) {
+    try {
+      const parsed = await pdfParse(file.buffer);
+      return parsed.text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  }
+
+  if (isStructuredTextFile(file.name, file.type)) {
+    return file.buffer
+      .toString("utf-8")
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function inferRequestedItemsFromRows(rows: string[][], rawLines: string[]): RequestedItem[] {
+  const inferredFromRows = rows
+    .map((row) => inferRequestedItemFromColumns(row))
+    .filter((item): item is RequestedItem => item !== null);
+
+  if (inferredFromRows.length > 0) {
+    return dedupeRequestedItems(inferredFromRows);
+  }
+
+  return inferRequestedItemsFromLines(rawLines);
+}
+
+function inferRequestedItemsFromLines(lines: string[]): RequestedItem[] {
+  return dedupeRequestedItems(
+    lines
+      .map((line) => inferRequestedItemFromLine(line))
+      .filter((item): item is RequestedItem => item !== null)
+  );
+}
+
+function inferRequestedItemFromColumns(columns: string[]): RequestedItem | null {
+  const cleaned = columns.map((value) => value.trim()).filter(Boolean);
+  if (cleaned.length < 3) {
+    return null;
+  }
+
+  const sku = cleaned[0] ?? "";
+  const quantity = parseDecimal(cleaned[cleaned.length - 1] ?? "");
+  if (!sku || !Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+
+  const possibleUnit = cleaned[cleaned.length - 2] ?? "";
+  const hasUnit = isLikelyUnit(possibleUnit);
+  const description = cleaned.slice(1, hasUnit ? -2 : -1).join(" ").trim();
+  if (!description || looksLikeHeader(`${sku} ${description}`)) {
+    return null;
+  }
+
+  return {
+    sku,
+    description,
+    unit: hasUnit ? possibleUnit : "UN",
+    requestedQuantity: quantity,
+    source: "inferred-from-quote"
+  };
+}
+
+function inferRequestedItemFromLine(line: string): RequestedItem | null {
+  const compact = line.replace(/\s+/g, " ").trim();
+  if (!compact || looksLikeHeader(compact)) {
+    return null;
+  }
+
+  const quantityMatch = compact.match(/(\d+(?:[.,]\d+)?)$/);
+  if (!quantityMatch?.index) {
+    return null;
+  }
+
+  const quantity = parseDecimal(quantityMatch[1]);
+  if (!Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+
+  const prefix = compact.slice(0, quantityMatch.index).trim();
+  const skuMatch = prefix.match(/^([A-Za-z0-9./_-]{3,})\s+(.+)$/);
+  if (!skuMatch) {
+    return null;
+  }
+
+  let unit = "UN";
+  let description = skuMatch[2].trim();
+  const unitMatch = description.match(/^(.*)\s+(UN|UND|UNID|ROLO|RL|M|MT|PCA|PC|KIT|CJ|CX)$/i);
+  if (unitMatch) {
+    description = unitMatch[1].trim();
+    unit = unitMatch[2].trim().toUpperCase();
+  }
+
+  if (!description) {
+    return null;
+  }
+
+  return {
+    sku: skuMatch[1],
+    description,
+    unit,
+    requestedQuantity: quantity,
+    source: "inferred-from-quote"
+  };
+}
+
+function inferSupplierQuoteRowsFromRows(rows: string[][], rawLines: string[]): SupplierQuoteRow[] {
+  const inferredFromRows = rows
+    .map((row) => inferSupplierQuoteRowFromColumns(row))
+    .filter((item): item is SupplierQuoteRow => item !== null);
+
+  if (inferredFromRows.length > 0) {
+    return dedupeSupplierQuoteRows(inferredFromRows);
+  }
+
+  return inferSupplierQuoteRowsFromLines(rawLines);
+}
+
+function inferSupplierQuoteRowsFromLines(lines: string[]): SupplierQuoteRow[] {
+  return dedupeSupplierQuoteRows(
+    lines
+      .map((line) => inferSupplierQuoteRowFromLine(line))
+      .filter((item): item is SupplierQuoteRow => item !== null)
+  );
+}
+
+function inferSupplierQuoteRowFromColumns(columns: string[]): SupplierQuoteRow | null {
+  const cleaned = columns.map((value) => value.trim()).filter(Boolean);
+  if (cleaned.length < 3) {
+    return null;
+  }
+
+  const sku = cleaned[0] ?? "";
+  if (!sku || looksLikeHeader(cleaned.join(" "))) {
+    return null;
+  }
+
+  const numericPositions = cleaned
+    .map((value, index) => ({ index, value: parseDecimal(value) }))
+    .filter((entry) => Number.isFinite(entry.value) && entry.value > 0);
+
+  if (numericPositions.length === 0) {
+    return null;
+  }
+
+  const totalCandidate = numericPositions[numericPositions.length - 1];
+  const unitCandidate = numericPositions.length > 1 ? numericPositions[numericPositions.length - 2] : totalCandidate;
+  const description = cleaned.slice(1, unitCandidate.index).join(" ").trim();
+  if (!description) {
+    return null;
+  }
+
+  const totalValue =
+    numericPositions.length > 1 && totalCandidate.index > unitCandidate.index ? totalCandidate.value : null;
+
+  return {
+    sku,
+    description,
+    unitPrice: unitCandidate.value,
+    totalValue
+  };
+}
+
+function inferSupplierQuoteRowFromLine(line: string): SupplierQuoteRow | null {
+  const compact = line.replace(/\s+/g, " ").trim();
+  if (!compact || looksLikeHeader(compact)) {
+    return null;
+  }
+
+  const skuMatch = compact.match(/^([A-Za-z0-9./_-]{3,})\s+(.+)$/);
+  if (!skuMatch) {
+    return null;
+  }
+
+  const remainder = skuMatch[2].trim();
+  const numericMatches = Array.from(remainder.matchAll(/(\d+(?:[.,]\d+)?)/g));
+  if (numericMatches.length === 0) {
+    return null;
+  }
+
+  const totalCandidate = numericMatches[numericMatches.length - 1];
+  const unitCandidate = numericMatches.length > 1 ? numericMatches[numericMatches.length - 2] : totalCandidate;
+  const description = remainder.slice(0, unitCandidate.index).trim();
+  if (!description) {
+    return null;
+  }
+
+  const unitPrice = parseDecimal(unitCandidate[1]);
+  const totalValue =
+    numericMatches.length > 1 && typeof totalCandidate.index === "number" && totalCandidate.index > (unitCandidate.index ?? 0)
+      ? parseDecimal(totalCandidate[1])
+      : null;
+
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+    return null;
+  }
+
+  return {
+    sku: skuMatch[1],
+    description,
+    unitPrice,
+    totalValue: Number.isFinite(totalValue ?? NaN) && (totalValue ?? 0) > 0 ? totalValue : null
+  };
+}
+
+function dedupeRequestedItems(items: RequestedItem[]) {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = `${normalizeComparable(item.sku)}::${normalizeComparable(item.description)}`;
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function dedupeSupplierQuoteRows(rows: SupplierQuoteRow[]) {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const key = `${normalizeComparable(row.sku)}::${normalizeComparable(row.description)}`;
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function looksLikeHeader(value: string) {
+  if (/^sku[-_.]?\d+/i.test(value.trim())) {
+    return false;
+  }
+
+  const normalizedTokens = value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+
+  const headerTokens = new Set(["sku", "descricao", "quantidade", "qtd", "qtde", "preco", "valor", "unitario", "total"]);
+  const matchedHeaderTokens = normalizedTokens.filter((token) => headerTokens.has(token)).length;
+  return matchedHeaderTokens >= 2;
+}
+
+function isLikelyUnit(value: string) {
+  return /^(UN|UND|UNID|ROLO|RL|M|MT|PCA|PC|KIT|CJ|CX)$/i.test(value.trim());
 }
 
 function classifyUploadFile(file: UploadFileInput): FileCapability {

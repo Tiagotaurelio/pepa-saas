@@ -274,7 +274,6 @@ export default function CotacoesPepaPage() {
                 ref={mirrorInputRef}
                 className="mt-4 block w-full text-sm text-slate-600"
                 type="file"
-                accept=".csv,.txt,.xlsx,.xls,.pdf"
                 onChange={(event) => setMirrorFile(event.target.files?.[0] ?? null)}
               />
             </label>
@@ -289,7 +288,6 @@ export default function CotacoesPepaPage() {
                 className="mt-4 block w-full text-sm text-slate-600"
                 type="file"
                 multiple
-                accept=".pdf,.csv,.txt,.xlsx,.xls"
                 onChange={(event) => setSupplierFiles(Array.from(event.target.files ?? []))}
               />
             </label>
@@ -307,6 +305,17 @@ export default function CotacoesPepaPage() {
                 title="Leitura prevista desta rodada"
                 message={buildUploadPreviewMessage(mirrorFile, supplierFiles)}
               />
+              <div className="mt-3 space-y-2">
+                {buildUploadPreviewItems(mirrorFile, supplierFiles).map((item) => (
+                  <div key={`${item.role}-${item.fileName}`} className="flex flex-wrap items-center justify-between gap-3 rounded-[20px] bg-brand-surface px-4 py-3 text-sm text-slate-600">
+                    <div>
+                      <p className="font-medium text-brand-ink">{item.fileName}</p>
+                      <p className="text-xs text-slate-500">{item.detail}</p>
+                    </div>
+                    <span className={uploadPreviewBadgeClasses(item.mode)}>{uploadPreviewBadgeLabel(item.mode)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -761,6 +770,17 @@ function detectSelectedFormat(file: File): "csv" | "txt" | "xlsx" | "xls" | "pdf
   return "other";
 }
 
+function getSelectedProcessingMode(file: File): "immediate-comparison" | "ocr-queue" | "stored-for-review" {
+  const format = detectSelectedFormat(file);
+  if (format === "csv" || format === "txt" || format === "xlsx" || format === "xls") {
+    return "immediate-comparison";
+  }
+  if (format === "pdf") {
+    return "ocr-queue";
+  }
+  return "stored-for-review";
+}
+
 function describeSelectedFile(file: File, role: "mirror" | "supplier"): string {
   const format = detectSelectedFormat(file);
   if (format === "csv" || format === "txt" || format === "xlsx" || format === "xls") {
@@ -800,4 +820,53 @@ function buildUploadPreviewMessage(mirrorFile: File | null, supplierFiles: File[
   }
 
   return lines.join(" ");
+}
+
+function buildUploadPreviewItems(mirrorFile: File | null, supplierFiles: File[]) {
+  const items: Array<{
+    role: "mirror" | "supplier";
+    fileName: string;
+    detail: string;
+    mode: "immediate-comparison" | "ocr-queue" | "stored-for-review";
+  }> = [];
+
+  if (mirrorFile) {
+    items.push({
+      role: "mirror",
+      fileName: mirrorFile.name,
+      detail: "Arquivo-base da rodada",
+      mode: getSelectedProcessingMode(mirrorFile)
+    });
+  }
+
+  supplierFiles.forEach((file) => {
+    items.push({
+      role: "supplier",
+      fileName: file.name,
+      detail: "Anexo de fornecedor",
+      mode: getSelectedProcessingMode(file)
+    });
+  });
+
+  return items;
+}
+
+function uploadPreviewBadgeLabel(mode: "immediate-comparison" | "ocr-queue" | "stored-for-review") {
+  if (mode === "immediate-comparison") {
+    return "Comparativo imediato";
+  }
+  if (mode === "ocr-queue") {
+    return "Tenta leitura / OCR";
+  }
+  return "Revisao manual";
+}
+
+function uploadPreviewBadgeClasses(mode: "immediate-comparison" | "ocr-queue" | "stored-for-review") {
+  if (mode === "immediate-comparison") {
+    return "rounded-full bg-brand-success/10 px-3 py-1 text-xs font-semibold text-brand-success";
+  }
+  if (mode === "ocr-queue") {
+    return "rounded-full bg-brand-attention/10 px-3 py-1 text-xs font-semibold text-brand-attention";
+  }
+  return "rounded-full bg-slate-900/10 px-3 py-1 text-xs font-semibold text-slate-700";
 }

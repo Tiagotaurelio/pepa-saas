@@ -312,4 +312,44 @@ describe("PEPA upload integration", () => {
       detectedFormat: "other"
     });
   });
+
+  it("infers mirror items and supplier quotes from mixed text without strict headers", async () => {
+    const tenantId = "tenant-inferred";
+    const mirrorTxt = [
+      "SKU-200 Cabo Flex 6mm Preto ROLO 120",
+      "SKU-201 Disjuntor Bipolar 20A UN 15"
+    ].join("\n");
+    const supplierTxt = [
+      "SKU-200  Cabo Flex 6mm Preto  8,75  1050,00",
+      "SKU-201  Disjuntor Bipolar 20A  19,90  298,50"
+    ].join("\n");
+
+    const snapshot = await persistPepaUploadRound({
+      tenantId,
+      mirrorFile: {
+        name: "espelho-sem-cabecalho.txt",
+        type: "text/plain",
+        buffer: Buffer.from(mirrorTxt)
+      },
+      supplierFiles: [
+        {
+          name: "fornecedor-sem-cabecalho.txt",
+          type: "text/plain",
+          buffer: Buffer.from(supplierTxt)
+        }
+      ]
+    });
+
+    expect(snapshot.latestRound?.requestedItemsCount).toBe(2);
+    expect(snapshot.diagnostics).toMatchObject({
+      parsedSuppliers: 1,
+      mirrorStructured: true,
+      mirrorFormat: "txt"
+    });
+    expect(snapshot.comparisonRows.map((row) => row.bestSupplier)).toEqual([
+      "fornecedor sem cabecalho",
+      "fornecedor sem cabecalho"
+    ]);
+    expect(snapshot.comparisonRows.map((row) => row.bestUnitPrice)).toEqual([8.75, 19.9]);
+  });
 });
