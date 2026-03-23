@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
   if (mirrorFile.size > maxFileSizeBytes || normalizedSupplierFiles.some((file) => file.size > maxFileSizeBytes)) {
     return NextResponse.json(
-      { error: "Cada arquivo deve ter no maximo 10 MB nesta fase piloto." },
+      { error: "Cada arquivo deve ter no maximo 10 MB." },
       { status: 400 }
     );
   }

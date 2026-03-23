@@ -70,7 +70,7 @@ export function AppShell({ children, tenantName, userName }: AppShellProps) {
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-muted">
-                  Operacao piloto
+                  Operacao de compras
                 </p>
                 <p className="text-sm text-slate-500">
                   Comparativo de cotacoes, validacao e exportacao de pedido final.

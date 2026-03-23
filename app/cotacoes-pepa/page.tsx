@@ -280,7 +280,7 @@ export default function CotacoesPepaPage() {
           }
           title={
             !snapshot.latestRound
-              ? "Rodada piloto ativa"
+              ? "Nenhuma rodada carregada"
               : snapshot.latestRound.status === "closed"
                 ? "Rodada pronta para auditoria"
                 : snapshot.totals.ocrQueue > 0 || snapshot.totals.quotedItems < snapshot.totals.requestedItems
@@ -289,7 +289,7 @@ export default function CotacoesPepaPage() {
           }
           message={
             !snapshot.latestRound
-              ? "Suba o espelho do Flex e os anexos dos fornecedores para substituir a base demonstrativa por uma rodada real."
+              ? "Suba o espelho do Flex e os anexos dos fornecedores para iniciar a primeira rodada real desta base."
               : snapshot.latestRound.status === "closed"
                 ? "Esta rodada ja foi congelada para auditoria. Use o historico para revisar ou siga para exportacao do pedido final."
                 : snapshot.totals.ocrQueue > 0 || snapshot.totals.quotedItems < snapshot.totals.requestedItems
@@ -386,16 +386,16 @@ export default function CotacoesPepaPage() {
             <div>
               <p className="text-sm text-slate-500">Ultima rodada carregada</p>
               <h3 className="mt-1 text-xl font-semibold">
-                {snapshot.latestRound ? snapshot.latestRound.mirrorFileName : "Modo demonstracao"}
+                {snapshot.latestRound ? snapshot.latestRound.mirrorFileName : "Nenhuma rodada carregada"}
               </h3>
               <p className="mt-3 text-sm leading-6 text-slate-500">
                 {snapshot.latestRound
                   ? `Rodada salva em ${formatDateTime(snapshot.latestRound.createdAt)} com ${snapshot.latestRound.supplierFilesCount} anexo(s) de fornecedor.`
-                  : "Enquanto nenhuma rodada real for enviada, a tela continua usando o dataset piloto para demonstracao."}
+                  : "Nenhuma rodada foi enviada ainda. Assim que voce salvar a primeira importacao, o comparativo real aparece aqui."}
               </p>
             </div>
             <span className="rounded-full bg-brand-surface px-4 py-2 text-sm text-slate-600">
-              {snapshot.latestRound ? `${snapshot.latestRound.requestedItemsCount} item(ns) estruturado(s)` : "Base piloto"}
+              {snapshot.latestRound ? `${snapshot.latestRound.requestedItemsCount} item(ns) estruturado(s)` : "Sem rodada"}
             </span>
           </div>
 
@@ -491,7 +491,7 @@ export default function CotacoesPepaPage() {
           ))}
           {(snapshot.diagnostics?.warnings ?? []).length === 0 ? (
             <div className="rounded-[24px] bg-brand-success/10 px-4 py-4 text-sm text-brand-success">
-              Nenhum alerta estrutural na rodada atual.
+              {snapshot.latestRound ? "Nenhum alerta estrutural na rodada atual." : "Ainda nao existem alertas porque nenhuma rodada foi importada."}
             </div>
           ) : null}
         </div>
@@ -548,7 +548,7 @@ export default function CotacoesPepaPage() {
           ))}
           {rounds.length === 0 ? (
             <div className="rounded-[28px] border border-dashed border-slate-200 p-5 text-sm text-slate-500">
-              Nenhuma rodada salva ainda.
+              Nenhuma rodada salva ainda. Quando voce importar os primeiros arquivos, o historico aparece aqui.
             </div>
           ) : null}
         </div>

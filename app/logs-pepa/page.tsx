@@ -37,11 +37,11 @@ export default function LogsPepaPage() {
       <div className="mb-6">
         <OperationFeedback
           tone={snapshot.latestRound?.status === "closed" ? "success" : "info"}
-          title={snapshot.latestRound ? "Auditoria da rodada selecionada" : "Auditoria em modo demonstracao"}
+          title={snapshot.latestRound ? "Auditoria da rodada selecionada" : "Auditoria vazia"}
           message={
             snapshot.latestRound
               ? `${(snapshot.auditEvents ?? []).length} evento(s) registrados para consulta operacional nesta rodada.`
-              : "Assim que uma rodada real for salva, uploads, overrides e fechamento passam a aparecer aqui com horario e motivo."
+              : "Assim que uma rodada real for salva, uploads, ajustes e fechamento passam a aparecer aqui com horario e motivo."
           }
         />
       </div>
