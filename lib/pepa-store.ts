@@ -563,10 +563,16 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
         sku: columns[skuIndex] ?? "",
         description: columns[descriptionIndex] ?? "",
         unitPrice,
-        totalValue: Number.isFinite(totalValue) && totalValue > 0 ? totalValue : null
+        totalValue: Number.isFinite(totalValue) && totalValue > 0 && isPlausibleTotalValue(totalValue) ? totalValue : null
       };
     })
-    .filter((item) => (item.sku || item.description) && Number.isFinite(item.unitPrice) && item.unitPrice > 0);
+    .filter(
+      (item) =>
+        (item.sku || item.description) &&
+        Number.isFinite(item.unitPrice) &&
+        item.unitPrice > 0 &&
+        isPlausibleMoneyValue(item.unitPrice)
+    );
 
   return {
     supplierName,
@@ -689,6 +695,14 @@ function parseDecimal(value: string): number {
   }
 
   return Number(normalized);
+}
+
+function isPlausibleMoneyValue(value: number) {
+  return Number.isFinite(value) && value > 0 && value <= 1_000_000;
+}
+
+function isPlausibleTotalValue(value: number | null) {
+  return value === null || (Number.isFinite(value) && value > 0 && value <= 100_000_000);
 }
 
 function normalizeHeader(value: string) {
@@ -974,7 +988,7 @@ function inferSupplierQuoteRowFromColumns(columns: string[]): SupplierQuoteRow |
 
   const numericPositions = cleaned
     .map((value, index) => ({ index, value: parseDecimal(value) }))
-    .filter((entry) => Number.isFinite(entry.value) && entry.value > 0);
+    .filter((entry) => Number.isFinite(entry.value) && entry.value > 0 && isPlausibleMoneyValue(entry.value));
 
   if (numericPositions.length === 0) {
     return null;
@@ -989,6 +1003,10 @@ function inferSupplierQuoteRowFromColumns(columns: string[]): SupplierQuoteRow |
 
   const totalValue =
     numericPositions.length > 1 && totalCandidate.index > unitCandidate.index ? totalCandidate.value : null;
+
+  if (!isPlausibleMoneyValue(unitCandidate.value) || !isPlausibleTotalValue(totalValue)) {
+    return null;
+  }
 
   return {
     sku,
@@ -1010,13 +1028,24 @@ function inferSupplierQuoteRowFromLine(line: string): SupplierQuoteRow | null {
   }
 
   const remainder = skuMatch[2].trim();
-  const numericMatches = Array.from(remainder.matchAll(/(\d+(?:[.,]\d+)?)/g));
-  if (numericMatches.length === 0) {
+  const numericMatches = Array.from(remainder.matchAll(/(\d[\d.,]*)/g));
+  const plausibleMoneyMatches = numericMatches
+    .map((match) => ({
+      match,
+      parsed: parseDecimal(match[1])
+    }))
+    .filter((entry) => Number.isFinite(entry.parsed) && entry.parsed > 0 && isPlausibleMoneyValue(entry.parsed));
+
+  if (plausibleMoneyMatches.length === 0) {
     return null;
   }
 
-  const totalCandidate = numericMatches[numericMatches.length - 1];
-  const unitCandidate = numericMatches.length > 1 ? numericMatches[numericMatches.length - 2] : totalCandidate;
+  const totalCandidate = plausibleMoneyMatches[plausibleMoneyMatches.length - 1]?.match;
+  const unitCandidate =
+    plausibleMoneyMatches.length > 1 ? plausibleMoneyMatches[plausibleMoneyMatches.length - 2]?.match : totalCandidate;
+  if (!totalCandidate || !unitCandidate) {
+    return null;
+  }
   const description = remainder.slice(0, unitCandidate.index).trim();
   if (!description) {
     return null;
@@ -1028,7 +1057,7 @@ function inferSupplierQuoteRowFromLine(line: string): SupplierQuoteRow | null {
       ? parseDecimal(totalCandidate[1])
       : null;
 
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0) {
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0 || !isPlausibleMoneyValue(unitPrice) || !isPlausibleTotalValue(totalValue)) {
     return null;
   }
 
