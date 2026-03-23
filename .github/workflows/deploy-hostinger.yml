@@ -41,8 +41,9 @@ jobs:
             if [ -z "$PEPA_PUBLIC_DOMAIN" ]; then
               PEPA_PUBLIC_DOMAIN="pepa-hml.tavarestech.cloud"
             fi
-            mkdir -p "$DEPLOY_PATH/data"
-            cat > "$DEPLOY_PATH/.env" <<'EOF'
+            HML_DATA_PATH="$DEPLOY_PATH/data-hml"
+            mkdir -p "$HML_DATA_PATH"
+            cat > "$DEPLOY_PATH/.env.hml" <<'EOF'
             PEPA_DATA_DIR=/app/data
             PEPA_DATABASE_URL=${{ secrets.PEPA_DATABASE_URL }}
             PEPA_DATABASE_SSL=${{ secrets.PEPA_DATABASE_SSL }}
@@ -74,9 +75,9 @@ jobs:
             docker run -d \
               --name pepa-saas-hml \
               --restart unless-stopped \
-              --env-file "$DEPLOY_PATH/.env" \
+              --env-file "$DEPLOY_PATH/.env.hml" \
               --network easypanel \
-              -v "$DEPLOY_PATH/data:/app/data" \
+              -v "$HML_DATA_PATH:/app/data" \
               -p 3101:3000 \
               pepa-saas:latest
             TRAEFIK_CONTAINER="$(docker ps --filter name=traefik --format '{{.Names}}' | head -n 1)"
