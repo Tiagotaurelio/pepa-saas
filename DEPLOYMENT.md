@@ -58,6 +58,7 @@ Workflow pronto:
 - [deploy-production.yml](/Users/tiagotavares/pepa-saas/.github/workflows/deploy-production.yml)
 - [public-healthcheck.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-healthcheck.yml)
 - [public-smoke.yml](/Users/tiagotavares/pepa-saas/.github/workflows/public-smoke.yml)
+- [OPERATIONS_PLAYBOOK.md](/Users/tiagotavares/homologation/OPERATIONS_PLAYBOOK.md)
 
 Secrets esperados no GitHub:
 

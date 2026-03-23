@@ -53,7 +53,9 @@ type SupplierQuoteRow = {
   sku: string;
   description: string;
   unitPrice: number;
+  finalUnitPrice?: number;
   totalValue: number | null;
+  quotedQuantity?: number;
 };
 
 type ParsedSupplierFile = {
@@ -443,7 +445,8 @@ function buildComparisonRows(
     const offers: ComparisonOffer[] = matchedQuotes.map(({ supplierName, quote }) => ({
       supplierName,
       unitPrice: quote.unitPrice,
-      totalValue: quote.totalValue
+      totalValue: quote.totalValue,
+      quotedQuantity: quote.quotedQuantity ?? null
     }));
 
     return {
@@ -456,10 +459,11 @@ function buildComparisonRows(
       bestUnitPrice: bestQuote?.quote.unitPrice ?? null,
       bestTotal: bestQuote ? roundCurrency(item.requestedQuantity * bestQuote.quote.unitPrice) : null,
       itemStatus: bestQuote ? "quoted" : "ocr-pending",
-      source: item.source
-      ,
+      source: item.source,
       offers,
-      selectionMode: "automatic"
+      selectionMode: "automatic",
+      baseUnitPrice: item.baseUnitPrice ?? null,
+      supplierRef: item.supplierRef
     };
   });
 }
@@ -468,6 +472,14 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
   const capability = classifyUploadFile(file);
   if (!capability.canUseTabularParser) {
     return [];
+  }
+
+  // Parser dedicado para PDF gerado pelo Flex (COMPRA DE MERCADORIA)
+  if (file.name.toLowerCase().endsWith(".pdf")) {
+    const lines = await extractTextLines(file);
+    const flexItems = parseFlexOrderPdfLines(lines);
+    if (flexItems.length > 0) return flexItems;
+    return inferRequestedItemsFromLines(lines);
   }
 
   const table = await parseTabularFile(file);
@@ -509,6 +521,24 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
       freightTerms: "Nao lido",
       quoteDate: null
     };
+  }
+
+  // Parser dedicado para PDF de orçamento do fornecedor
+  if (file.name.toLowerCase().endsWith(".pdf")) {
+    const lines = await extractTextLines(file);
+    const quoteItems = parseSupplierQuotePdfLines(lines);
+    if (quoteItems.length > 0) {
+      return {
+        supplierName,
+        sourceFile: file.name,
+        extractionStatus: "parsed",
+        detectedFormat: "pdf",
+        quotedItems: quoteItems,
+        paymentTerms: extractPdfPaymentTerms(lines),
+        freightTerms: "Nao informado",
+        quoteDate: extractPdfQuoteDate(lines)
+      };
+    }
   }
 
   const table = await parseTabularFile(file);
@@ -864,6 +894,180 @@ async function extractTextLines(file: UploadFileInput): Promise<string[]> {
   return [];
 }
 
+// ─── Parser específico para PDF do Flex (COMPRA DE MERCADORIA) ────────────────
+// Estrutura: 10 linhas por item após cada cabeçalho "Seq":
+//   [0] seq  [1] código PEPA  [2] descrição  [3] un  [4] ref.fornecedor
+//   [5] qtde  [6] prev.fat.   [7] vl.unit    [8] vl.total  [9] %ipi
+function parseFlexOrderPdfLines(lines: string[]): RequestedItem[] {
+  const items: RequestedItem[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i] === "Seq") {
+      i += 10; // pula as 10 linhas do cabeçalho
+      while (i + 9 < lines.length) {
+        const seq = parseInt(lines[i] ?? "", 10);
+        const pepaCode = (lines[i + 1] ?? "").trim();
+        const description = (lines[i + 2] ?? "").trim();
+        const unit = (lines[i + 3] ?? "").trim();
+        const supplierRef = (lines[i + 4] ?? "").trim();
+        const qty = parseInt(lines[i + 5] ?? "", 10);
+        const vlUnitStr = (lines[i + 7] ?? "").trim();
+        if (
+          !isNaN(seq) && seq > 0 && seq <= 99 &&
+          /^\d{5,6}$/.test(pepaCode) &&
+          description.length > 0 &&
+          /^\d{4,6}$/.test(supplierRef) &&
+          !isNaN(qty) && qty > 0
+        ) {
+          const baseUnitPrice = parseDecimal(vlUnitStr);
+          items.push({
+            sku: pepaCode,
+            description,
+            unit: unit || "UN",
+            requestedQuantity: qty,
+            source: "real-supplier-quote",
+            supplierRef,
+            ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
+          });
+          i += 10;
+        } else {
+          break;
+        }
+      }
+    } else {
+      i++;
+    }
+  }
+  return items;
+}
+
+// ─── Parser específico para PDF de orçamento do fornecedor ────────────────────
+// Âncora: cada item tem um NCM de 8 dígitos na linha de dados.
+// Linha NCM:  {seq}{cod}{descrição}{NCM8}{alq2%}${preçofinal}${ipi}
+// Linha total: ${total} (pode estar colada com qtde+preço)
+// Linha qtde:  {qtde}${preço}{ipi%}...
+function parseSupplierQuotePdfLines(lines: string[]): SupplierQuoteRow[] {
+  const items: SupplierQuoteRow[] = [];
+  const ncmLineRegex = /(\d{8})[\d.]*\s*%[^$]*\$([\d,.]+)\$([\d,.]+)/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const ncmMatch = line.match(ncmLineRegex);
+    if (!ncmMatch) continue;
+
+    const finalUnitPrice = parseDecimal(ncmMatch[2]);
+    const ncmStartPos = line.indexOf(ncmMatch[1]);
+    const beforeNcm = line.substring(0, ncmStartPos);
+
+    let cod = "";
+    let description = "";
+
+    // tenta extrair seq+cod+descrição da própria linha NCM
+    const seqCodInline = beforeNcm.match(/^(\d{1,2})(\d{4,6})(.*)/);
+    if (seqCodInline) {
+      cod = seqCodInline[2];
+      description = seqCodInline[3].trim();
+    } else {
+      // descrição está em linhas anteriores — busca para trás
+      for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
+        const prev = (lines[j] ?? "").trim();
+        if (!prev || prev.startsWith("$") || /^\d+\$/.test(prev)) break;
+        const itemStart = prev.match(/^(\d{1,2})(\d{4,6})(.*)/);
+        if (itemStart) {
+          cod = itemStart[2];
+          const descParts: string[] = [];
+          const startDesc = itemStart[3].trim();
+          if (startDesc) descParts.push(startDesc);
+          for (let k = j + 1; k < i; k++) {
+            const dl = (lines[k] ?? "").trim();
+            if (dl) descParts.push(dl);
+          }
+          description = descParts.join(" ");
+          break;
+        }
+        // linha é continuação de descrição — será capturada quando acharmos o itemStart
+      }
+    }
+
+    if (!cod) continue;
+
+    // extrai total + qtde + preço base das linhas seguintes
+    const postData = extractSupplierPostNcmData(lines, i);
+    if (!postData) continue;
+
+    items.push({
+      sku: cod,
+      description: description || `Produto ${cod}`,
+      unitPrice: postData.unitPrice,
+      finalUnitPrice,
+      totalValue: postData.total,
+      quotedQuantity: postData.qty
+    });
+  }
+
+  return items;
+}
+
+// Extrai total + qtde + preço da(s) linha(s) após a linha NCM.
+// Nos PDFs do fornecedor os preços têm SEMPRE 4 casas decimais.
+// Ex: "150$1.06009.75 %..." → qty=150, price=1.0600
+// Ex: "$83.330412$6.60105.20 %..." → total=83.3304, qty=12, price=6.6010
+function extractSupplierPostNcmData(
+  lines: string[],
+  ncmIdx: number
+): { total: number; qty: number; unitPrice: number } | null {
+  const nextLine = (lines[ncmIdx + 1] ?? "").trim();
+  if (!nextLine.startsWith("$")) return null;
+
+  // Caso mesclado: $TOTAL{qty}$price (total e preço com 4 casas decimais)
+  const merged = nextLine.match(/^\$([\d,]+\.\d{4})(\d+)\$([\d]+\.\d{4})/);
+  if (merged) {
+    return {
+      total: parseDecimal(merged[1]),
+      qty: parseInt(merged[2], 10),
+      unitPrice: parseDecimal(merged[3])
+    };
+  }
+
+  // Caso separado: $TOTAL na linha, depois {qty}$price na próxima
+  const totalMatch = nextLine.match(/^\$([\d,]+\.\d{2,4})/);
+  if (!totalMatch) return null;
+  const total = parseDecimal(totalMatch[1]);
+
+  const qtyLine = (lines[ncmIdx + 2] ?? "").trim();
+  // Preço sempre com 4 casas decimais — para de forma precisa
+  const qtyMatch = qtyLine.match(/^(\d+)\$([\d]+\.\d{4})/);
+  if (!qtyMatch) return null;
+
+  return {
+    total,
+    qty: parseInt(qtyMatch[1], 10),
+    unitPrice: parseDecimal(qtyMatch[2])
+  };
+}
+
+// Extrai prazo de pagamento de linhas do PDF
+function extractPdfPaymentTerms(lines: string[]): string {
+  for (let i = 0; i < lines.length; i++) {
+    if (/prazo/i.test(lines[i] ?? "")) {
+      const next = (lines[i + 1] ?? "").trim();
+      if (/\d/.test(next)) return next;
+    }
+    const condMatch = (lines[i] ?? "").match(/Condi[çc][aã]o\s+Pgto:\s*(.+)/i);
+    if (condMatch) return condMatch[1].trim();
+  }
+  return "Aguardando parser comercial";
+}
+
+// Extrai data da cotação do PDF do fornecedor
+function extractPdfQuoteDate(lines: string[]): string | null {
+  for (const line of lines) {
+    const m = line.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 function inferRequestedItemsFromRows(rows: string[][], rawLines: string[]): RequestedItem[] {
   const inferredFromRows = rows
     .map((row) => inferRequestedItemFromColumns(row))
@@ -1144,12 +1348,19 @@ function classifyUploadFile(file: UploadFileInput): FileCapability {
 }
 
 function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
-  const quoteSku = normalizeComparable(quote.sku);
-  const itemSku = normalizeComparable(item.sku);
-  if (quoteSku && itemSku && quoteSku === itemSku) {
-    return true;
+  // Chave primária: Ref.Fornecedor (Flex) = COD (fornecedor)
+  if (item.supplierRef) {
+    const quoteRef = normalizeComparable(quote.sku);
+    const itemRef = normalizeComparable(item.supplierRef);
+    if (quoteRef && itemRef && quoteRef === itemRef) return true;
   }
 
+  // Fallback: SKU direto
+  const quoteSku = normalizeComparable(quote.sku);
+  const itemSku = normalizeComparable(item.sku);
+  if (quoteSku && itemSku && quoteSku === itemSku) return true;
+
+  // Fallback: descrição
   const quoteDescription = normalizeComparable(quote.description);
   const itemDescription = normalizeComparable(item.description);
   return Boolean(quoteDescription && itemDescription && quoteDescription === itemDescription);

@@ -313,15 +313,20 @@ export default function ValidacaoCompraPepaPage() {
                 <th className="px-4">Item</th>
                 <th className="px-4">Qtd</th>
                 <th className="px-4">Fornecedor escolhido</th>
+                <th className="px-4">Preco Flex</th>
                 <th className="px-4">Preco unit.</th>
+                <th className="px-4">Dif.</th>
                 <th className="px-4">Total</th>
                 <th className="px-4">Motivo</th>
                 <th className="px-4">Revisao</th>
               </tr>
             </thead>
             <tbody>
-              {snapshot.decisions.map((item) => (
-                <tr key={`${item.sku}-${item.description}`} className="bg-brand-surface text-sm text-slate-600">
+              {snapshot.decisions.map((item) => {
+                const hasPriceDiff = item.baseUnitPrice != null && Math.abs(item.chosenUnitPrice - item.baseUnitPrice) > 0.001;
+                const rowBg = hasPriceDiff ? "bg-red-50" : "bg-brand-surface";
+                return (
+                <tr key={`${item.sku}-${item.description}`} className={`${rowBg} text-sm text-slate-600`}>
                   <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{item.sku}</td>
                   <td className="px-4 py-4">{item.description}</td>
                   <td className="px-4 py-4">{formatQuantity(item.requestedQuantity)}</td>
@@ -349,6 +354,9 @@ export default function ValidacaoCompraPepaPage() {
                       ))}
                     </select>
                   </td>
+                  <td className="px-4 py-4 text-slate-500">
+                    {item.baseUnitPrice != null ? formatCurrency(item.baseUnitPrice) : "—"}
+                  </td>
                   <td className="px-4 py-4">
                     <input
                       className="w-28 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm"
@@ -370,6 +378,11 @@ export default function ValidacaoCompraPepaPage() {
                       }}
                     />
                   </td>
+                  <td className="px-4 py-4">
+                    {hasPriceDiff && item.baseUnitPrice != null
+                      ? formatPriceDiffBadge(item.baseUnitPrice, item.chosenUnitPrice)
+                      : <span className="text-slate-300">—</span>}
+                  </td>
                   <td className="px-4 py-4">{formatCurrency(item.chosenTotal)}</td>
                   <td className="px-4 py-4">{item.decisionReason}</td>
                   <td className="rounded-r-[24px] px-4 py-4">
@@ -381,7 +394,8 @@ export default function ValidacaoCompraPepaPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -411,6 +425,16 @@ function SummaryStat(props: { label: string; value: string }) {
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+}
+
+function formatPriceDiffBadge(baseUnitPrice: number, chosenUnitPrice: number) {
+  const diff = ((chosenUnitPrice - baseUnitPrice) / baseUnitPrice) * 100;
+  const label = `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${diff > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+      {label}
+    </span>
+  );
 }
 
 function formatQuantity(value: number): string {

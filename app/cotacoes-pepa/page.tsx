@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { OperationFeedback } from "@/components/operation-feedback";
@@ -27,6 +27,32 @@ export default function CotacoesPepaPage() {
   const [isTogglingRound, setIsTogglingRound] = useState(false);
   const [roundStatusMessage, setRoundStatusMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  const [showOnlyDivergences, setShowOnlyDivergences] = useState(false);
+  const [savingRowKey, setSavingRowKey] = useState<string | null>(null);
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [adjustedPrice, setAdjustedPrice] = useState("");
+  const [expandedOffersKey, setExpandedOffersKey] = useState<string | null>(null);
+
+  async function saveSelection(sku: string, description: string, supplierName: string | null, unitPrice: number | null) {
+    if (!snapshot.latestRound) return;
+    const rowKey = `${sku}-${description}`;
+    setSavingRowKey(rowKey);
+    try {
+      const res = await fetch("/api/pepa/selection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ roundId: snapshot.latestRound.id, sku, description, supplierName, unitPrice })
+      });
+      if (res.ok) {
+        window.dispatchEvent(new Event("pepa-store-updated"));
+      }
+    } finally {
+      setSavingRowKey(null);
+      setEditingRowKey(null);
+      setAdjustedPrice("");
+    }
+  }
 
   function forceLoginRedirect(message: string) {
     setStatusMessage({
@@ -645,8 +671,25 @@ export default function CotacoesPepaPage() {
               Quando o arquivo-base vier estruturado, a grade abaixo passa a refletir os itens reais da ultima rodada. Se os anexos dos fornecedores vierem em formato tabular, o comparativo ja tenta preencher melhor oferta automaticamente.
             </p>
           </div>
-          <div className="rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700">
-            Ordem do arquivo-base preservada
+          <div className="flex flex-wrap items-center gap-3">
+            {snapshot.comparisonRows.some(hasDivergence) && (
+              <button
+                type="button"
+                onClick={() => setShowOnlyDivergences((prev) => !prev)}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  showOnlyDivergences
+                    ? "bg-red-600 text-white"
+                    : "bg-red-50 text-red-700 hover:bg-red-100"
+                }`}
+              >
+                {showOnlyDivergences
+                  ? `Mostrando ${snapshot.comparisonRows.filter(hasDivergence).length} divergencia(s)`
+                  : `Ver so divergencias (${snapshot.comparisonRows.filter(hasDivergence).length})`}
+              </button>
+            )}
+            <div className="rounded-full bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700">
+              Ordem do arquivo-base preservada
+            </div>
           </div>
         </div>
 
@@ -656,40 +699,184 @@ export default function CotacoesPepaPage() {
               <tr className="text-left text-xs uppercase tracking-[0.2em] text-brand-muted">
                 <th className="px-4">SKU</th>
                 <th className="px-4">Item</th>
-                <th className="px-4">Qtd</th>
-                <th className="px-4">Unidade</th>
-                <th className="px-4">Melhor fornecedor</th>
-                <th className="px-4">Preco unit.</th>
+                <th className="px-4">Qtd pedida</th>
+                <th className="px-4">Unid.</th>
+                <th className="px-4">Fornecedor</th>
+                <th className="px-4">Preco Flex</th>
+                <th className="px-4">Preco Cotado</th>
+                <th className="px-4">Dif.</th>
                 <th className="px-4">Total</th>
                 <th className="px-4">Status</th>
               </tr>
             </thead>
             <tbody>
-              {snapshot.comparisonRows.map((row) => (
-                <tr key={`${row.sku}-${row.description}`} className="rounded-[24px] bg-brand-surface text-sm text-slate-600">
-                  <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
-                  <td className="px-4 py-4">{row.description}</td>
-                  <td className="px-4 py-4">{formatQuantity(row.requestedQuantity)}</td>
-                  <td className="px-4 py-4">{row.unit}</td>
-                  <td className="px-4 py-4">{row.bestSupplier ?? "Aguardando"}</td>
-                  <td className="px-4 py-4">
-                    {row.bestUnitPrice === null ? "Pendente" : formatCurrency(row.bestUnitPrice)}
-                  </td>
-                  <td className="px-4 py-4">
-                    {row.bestTotal === null ? "Pendente" : formatCurrency(row.bestTotal)}
-                  </td>
-                  <td className="rounded-r-[24px] px-4 py-4">
-                    <div className="flex flex-col gap-2">
-                      <span className={comparisonStatusClasses(row.itemStatus)}>
-                        {row.itemStatus === "quoted" ? "Cotado" : "Leitura pendente"}
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        {row.source === "inferred-from-quote" ? "Reordenado conforme o arquivo-base" : "Capturado do arquivo-base"}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {snapshot.comparisonRows
+                .filter((row) => !showOnlyDivergences || hasDivergence(row))
+                .flatMap((row) => {
+                  const priceDivergence = hasPriceDivergence(row);
+                  const qtyDivergence = hasQuantityDivergence(row);
+                  const anyDivergence = priceDivergence || qtyDivergence;
+                  const offer = row.offers?.[0];
+                  const rowKey = `${row.sku}-${row.description}`;
+                  const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
+                  const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
+                  const isExpanded = expandedOffersKey === rowKey;
+                  const mainRow = (
+                    <tr key={rowKey} className={`rounded-[24px] ${rowBg} text-sm text-slate-600`}>
+                      <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                      <td className="px-4 py-4">{row.description}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-col gap-1">
+                          <span>{formatQuantity(row.requestedQuantity)} {row.unit}</span>
+                          {qtyDivergence && offer?.quotedQuantity != null && (
+                            <span className="inline-flex w-fit rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                              Cotado: {formatQuantity(offer.quotedQuantity)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4">{row.unit}</td>
+                      <td className="px-4 py-4">
+                        <div className="flex flex-col gap-1">
+                          <span>{row.bestSupplier ?? "Aguardando"}</span>
+                          {hasMultipleOffers && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedOffersKey(isExpanded ? null : rowKey)}
+                              className="inline-flex w-fit items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+                            >
+                              {isExpanded ? "▲ Recolher" : `▼ Ver ${(row.offers?.length ?? 0)} ofertas`}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-4 text-slate-500">
+                        {row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}
+                      </td>
+                      <td className={`px-4 py-4 font-medium ${priceDivergence ? "text-red-700" : "text-slate-700"}`}>
+                        {row.bestUnitPrice === null ? "Pendente" : formatCurrency(row.bestUnitPrice)}
+                      </td>
+                      <td className="px-4 py-4">
+                        {priceDivergence && row.baseUnitPrice != null && row.bestUnitPrice != null
+                          ? formatPriceDiff(row.baseUnitPrice, row.bestUnitPrice)
+                          : <span className="text-slate-300">—</span>}
+                      </td>
+                      <td className="px-4 py-4">
+                        {row.bestTotal === null ? "Pendente" : formatCurrency(row.bestTotal)}
+                      </td>
+                      <td className="rounded-r-[24px] px-4 py-4">
+                        <div className="flex flex-col gap-2">
+                          <span className={comparisonStatusClasses(row.itemStatus)}>
+                            {row.itemStatus === "quoted" ? "Cotado" : "Leitura pendente"}
+                          </span>
+                          {row.selectionMode === "manual" && anyDivergence && (
+                            <span className="inline-flex w-fit rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                              Revisado
+                            </span>
+                          )}
+                          <span className="text-xs text-slate-400">
+                            {row.source === "inferred-from-quote" ? "Reordenado conforme o arquivo-base" : "Capturado do arquivo-base"}
+                          </span>
+                          {anyDivergence && row.selectionMode !== "manual" && snapshot.latestRound && (
+                            <div className="mt-1 flex flex-col gap-1">
+                              {editingRowKey === `${row.sku}-${row.description}` ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={adjustedPrice}
+                                    onChange={(e) => setAdjustedPrice(e.target.value)}
+                                    className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                                    placeholder="Ex: 1,50"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const price = parseLocalCurrency(adjustedPrice);
+                                      if (price > 0) {
+                                        void saveSelection(row.sku, row.description, row.bestSupplier, price);
+                                      }
+                                    }}
+                                    disabled={savingRowKey === `${row.sku}-${row.description}`}
+                                    className="rounded-lg bg-brand-blue px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                                  >
+                                    Salvar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingRowKey(null); setAdjustedPrice(""); }}
+                                    className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice)}
+                                    disabled={savingRowKey === `${row.sku}-${row.description}`}
+                                    className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
+                                  >
+                                    {savingRowKey === `${row.sku}-${row.description}` ? "Salvando..." : "Aceitar cotado"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingRowKey(`${row.sku}-${row.description}`); setAdjustedPrice(""); }}
+                                    className="inline-flex w-fit rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-200"
+                                  >
+                                    Ajustar preço
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                  const expandedRow = isExpanded && hasMultipleOffers ? (
+                    <tr key={`${rowKey}-offers`} className="text-sm">
+                      <td colSpan={10} className="rounded-[24px] bg-blue-50 px-6 py-4">
+                        <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-blue-600">
+                          Todas as ofertas para este item
+                        </p>
+                        <div className="flex flex-col gap-2">
+                          {(row.offers ?? []).map((o) => (
+                            <div key={o.supplierName} className="flex items-center gap-4 rounded-2xl bg-white px-4 py-3 shadow-sm">
+                              <span className="min-w-[140px] font-medium text-brand-ink">{o.supplierName}</span>
+                              <span className="min-w-[90px] text-slate-600">{formatCurrency(o.unitPrice)}/un</span>
+                              {o.quotedQuantity != null && (
+                                <span className="text-xs text-slate-400">Qtd cotada: {formatQuantity(o.quotedQuantity)}</span>
+                              )}
+                              {o.totalValue != null && (
+                                <span className="text-xs text-slate-400">Total: {formatCurrency(o.totalValue)}</span>
+                              )}
+                              <div className="ml-auto flex items-center gap-2">
+                                {o.supplierName === row.bestSupplier && (
+                                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
+                                    Selecionado
+                                  </span>
+                                )}
+                                {snapshot.latestRound && o.supplierName !== row.bestSupplier && (
+                                  <button
+                                    type="button"
+                                    disabled={savingRowKey === rowKey}
+                                    onClick={() => void saveSelection(row.sku, row.description, o.supplierName, o.unitPrice)}
+                                    className="rounded-full bg-brand-blue px-3 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                                  >
+                                    Escolher
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null;
+                  return [mainRow, expandedRow].filter((r): r is React.JSX.Element => r !== null);
+                })}
             </tbody>
           </table>
         </div>
@@ -723,6 +910,38 @@ function SupplierStat(props: { label: string; value: string }) {
       <p className="text-xs uppercase tracking-[0.2em] text-brand-muted">{props.label}</p>
       <p className="mt-2 text-sm font-medium text-brand-ink">{props.value}</p>
     </div>
+  );
+}
+
+function parseLocalCurrency(value: string): number {
+  // Accepts "1.234,56" (BR) or "1234.56" (US/plain)
+  const normalized = value.trim().replace(/\./g, "").replace(",", ".");
+  const parsed = parseFloat(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function hasPriceDivergence(row: { baseUnitPrice?: number | null; bestUnitPrice: number | null }): boolean {
+  if (row.baseUnitPrice == null || row.bestUnitPrice == null) return false;
+  return Math.abs(row.bestUnitPrice - row.baseUnitPrice) > 0.001;
+}
+
+function hasQuantityDivergence(row: { requestedQuantity: number; offers?: { quotedQuantity?: number | null }[] }): boolean {
+  const qty = row.offers?.[0]?.quotedQuantity;
+  if (qty == null) return false;
+  return qty !== row.requestedQuantity;
+}
+
+function hasDivergence(row: { baseUnitPrice?: number | null; bestUnitPrice: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[] }): boolean {
+  return hasPriceDivergence(row) || hasQuantityDivergence(row);
+}
+
+function formatPriceDiff(baseUnitPrice: number, bestUnitPrice: number) {
+  const diff = ((bestUnitPrice - baseUnitPrice) / baseUnitPrice) * 100;
+  const label = `${diff >= 0 ? "+" : ""}${diff.toFixed(1)}%`;
+  return (
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${diff > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+      {label}
+    </span>
   );
 }
 

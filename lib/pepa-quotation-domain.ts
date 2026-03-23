@@ -17,6 +17,8 @@ export type RequestedItem = {
   unit: string;
   requestedQuantity: number;
   source: "real-supplier-quote" | "inferred-from-quote";
+  supplierRef?: string;
+  baseUnitPrice?: number;
 };
 
 export type SupplierOffer = {
@@ -47,12 +49,15 @@ export type ComparisonRow = {
   source: "real-supplier-quote" | "inferred-from-quote";
   offers?: ComparisonOffer[];
   selectionMode?: "automatic" | "manual";
+  baseUnitPrice?: number | null;
+  supplierRef?: string;
 };
 
 export type ComparisonOffer = {
   supplierName: string;
   unitPrice: number;
   totalValue: number | null;
+  quotedQuantity?: number | null;
 };
 
 export type PepaSnapshot = {
@@ -119,6 +124,7 @@ export type PurchaseDecisionRow = {
   chosenTotal: number;
   decisionReason: string;
   manualReview: boolean;
+  baseUnitPrice?: number | null;
 };
 
 export type SupplierPurchaseSummary = {
@@ -302,7 +308,8 @@ export function derivePepaPurchaseValidationSnapshot(snapshot: PepaSnapshot): Pu
       chosenUnitPrice,
       chosenTotal,
       decisionReason: buildDecisionReason(row, commercialPending),
-      manualReview
+      manualReview,
+      baseUnitPrice: row.baseUnitPrice ?? null
     };
   });
 
