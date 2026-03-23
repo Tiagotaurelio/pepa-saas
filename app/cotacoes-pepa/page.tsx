@@ -28,6 +28,16 @@ export default function CotacoesPepaPage() {
   const [roundStatusMessage, setRoundStatusMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
+  function forceLoginRedirect(message: string) {
+    setStatusMessage({
+      tone: "error",
+      text: message
+    });
+    window.setTimeout(() => {
+      window.location.assign("/login");
+    }, 150);
+  }
+
   useEffect(() => {
     let active = true;
 
@@ -64,12 +74,7 @@ export default function CotacoesPepaPage() {
       void loadRounds();
     };
     const handleAuthExpired = () => {
-      setStatusMessage({
-        tone: "error",
-        text: "Sua sessao expirou. Redirecionando para o login."
-      });
-      router.replace("/login");
-      router.refresh();
+      forceLoginRedirect("Sua sessao expirou. Redirecionando para o login.");
     };
     window.addEventListener("pepa-store-updated", handleRefresh);
     window.addEventListener("pepa-auth-expired", handleAuthExpired);
@@ -114,13 +119,8 @@ export default function CotacoesPepaPage() {
       };
     };
     if (response.status === 401) {
-      setStatusMessage({
-        tone: "error",
-        text: "Sua sessao expirou. Entre novamente antes de salvar a rodada."
-      });
       setIsSubmitting(false);
-      router.replace("/login");
-      router.refresh();
+      forceLoginRedirect("Sua sessao expirou. Entre novamente antes de salvar a rodada.");
       return;
     }
     if (!response.ok) {
@@ -207,13 +207,14 @@ export default function CotacoesPepaPage() {
     });
     const payload = (await response.json()) as { error?: string };
     if (response.status === 401) {
+      setIsTogglingRound(false);
       setRoundStatusMessage({
         tone: "error",
         text: "Sua sessao expirou. Entre novamente para alterar a rodada."
       });
-      setIsTogglingRound(false);
-      router.replace("/login");
-      router.refresh();
+      window.setTimeout(() => {
+        window.location.assign("/login");
+      }, 150);
       return;
     }
     if (!response.ok) {
