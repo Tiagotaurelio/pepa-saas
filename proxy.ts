@@ -16,14 +16,22 @@ export function proxy(request: NextRequest) {
   const hasSession = Boolean(request.cookies.get(sessionCookieName)?.value);
 
   if (!hasSession && !isPublic) {
-    return NextResponse.redirect(new URL("/login", request.url));
+    const response = NextResponse.redirect(new URL("/login", request.url));
+    response.headers.set("Cache-Control", "no-store, max-age=0");
+    return response;
   }
 
   if (hasSession && pathname === "/login") {
-    return NextResponse.redirect(new URL("/cotacoes-pepa", request.url));
+    const response = NextResponse.redirect(new URL("/cotacoes-pepa", request.url));
+    response.headers.set("Cache-Control", "no-store, max-age=0");
+    return response;
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  if (pathname === "/" || pathname === "/login") {
+    response.headers.set("Cache-Control", "no-store, max-age=0");
+  }
+  return response;
 }
 
 export const config = {
