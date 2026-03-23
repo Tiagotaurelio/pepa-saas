@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { OperationFeedback } from "@/components/operation-feedback";
 import { PageHeader } from "@/components/page-header";
@@ -11,6 +11,7 @@ import { PepaUploadRoundSummary, getPepaWorkflowTotals } from "@/lib/pepa-quotat
 import { usePepaSnapshot } from "@/lib/use-pepa-snapshot";
 
 export default function CotacoesPepaPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const roundId = searchParams.get("roundId");
   const { snapshot, isLoading: isLoadingSnapshot, error: snapshotError } = usePepaSnapshot(roundId);
@@ -34,7 +35,17 @@ export default function CotacoesPepaPage() {
       if (active) {
         setHistoryError(null);
       }
-      const response = await fetch("/api/pepa/history", { cache: "no-store" });
+      const response = await fetch("/api/pepa/history", {
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+      if (response.status === 401) {
+        if (active) {
+          setHistoryError("Sua sessao expirou. Entre novamente para continuar.");
+        }
+        window.dispatchEvent(new Event("pepa-auth-expired"));
+        return;
+      }
       if (!response.ok) {
         if (active) {
           setHistoryError("Nao foi possivel carregar o historico de rodadas agora.");
@@ -52,12 +63,22 @@ export default function CotacoesPepaPage() {
     const handleRefresh = () => {
       void loadRounds();
     };
+    const handleAuthExpired = () => {
+      setStatusMessage({
+        tone: "error",
+        text: "Sua sessao expirou. Redirecionando para o login."
+      });
+      router.replace("/login");
+      router.refresh();
+    };
     window.addEventListener("pepa-store-updated", handleRefresh);
+    window.addEventListener("pepa-auth-expired", handleAuthExpired);
     return () => {
       active = false;
       window.removeEventListener("pepa-store-updated", handleRefresh);
+      window.removeEventListener("pepa-auth-expired", handleAuthExpired);
     };
-  }, []);
+  }, [router]);
 
   async function handleSubmit() {
     if (!mirrorFile || supplierFiles.length === 0) {
@@ -80,7 +101,8 @@ export default function CotacoesPepaPage() {
 
     const response = await fetch("/api/pepa/upload", {
       method: "POST",
-      body: formData
+      body: formData,
+      credentials: "same-origin"
     });
 
     const payload = (await response.json()) as {
@@ -91,6 +113,16 @@ export default function CotacoesPepaPage() {
         totals: { attachmentsReceived: number };
       };
     };
+    if (response.status === 401) {
+      setStatusMessage({
+        tone: "error",
+        text: "Sua sessao expirou. Entre novamente antes de salvar a rodada."
+      });
+      setIsSubmitting(false);
+      router.replace("/login");
+      router.refresh();
+      return;
+    }
     if (!response.ok) {
       setStatusMessage({
         tone: "error",
@@ -164,6 +196,7 @@ export default function CotacoesPepaPage() {
     });
     const response = await fetch("/api/pepa/round-status", {
       method: "POST",
+      credentials: "same-origin",
       headers: {
         "Content-Type": "application/json"
       },
@@ -173,6 +206,16 @@ export default function CotacoesPepaPage() {
       })
     });
     const payload = (await response.json()) as { error?: string };
+    if (response.status === 401) {
+      setRoundStatusMessage({
+        tone: "error",
+        text: "Sua sessao expirou. Entre novamente para alterar a rodada."
+      });
+      setIsTogglingRound(false);
+      router.replace("/login");
+      router.refresh();
+      return;
+    }
     if (!response.ok) {
       setRoundStatusMessage({
         tone: "error",

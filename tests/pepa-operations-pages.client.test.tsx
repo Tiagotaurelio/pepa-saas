@@ -18,7 +18,11 @@ const searchParamsState = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
-  useSearchParams: () => searchParamsState.value
+  useSearchParams: () => searchParamsState.value,
+  useRouter: () => ({
+    replace: vi.fn(),
+    refresh: vi.fn()
+  })
 }));
 
 const usePepaSnapshotMock = vi.fn();

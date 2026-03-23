@@ -19,7 +19,18 @@ export function usePepaSnapshot(roundId?: string | null) {
       }
 
       const search = roundId ? `?roundId=${encodeURIComponent(roundId)}` : "";
-      const response = await fetch(`/api/pepa/snapshot${search}`, { cache: "no-store" });
+      const response = await fetch(`/api/pepa/snapshot${search}`, {
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+      if (response.status === 401) {
+        if (active) {
+          setError("Sua sessao expirou. Entre novamente para continuar.");
+          setIsLoading(false);
+        }
+        window.dispatchEvent(new Event("pepa-auth-expired"));
+        return;
+      }
       if (!response.ok) {
         if (active) {
           setError("Nao foi possivel carregar a rodada atual.");
