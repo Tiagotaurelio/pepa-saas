@@ -1,16 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { OperationFeedback } from "@/components/operation-feedback";
-import { PageHeader } from "@/components/page-header";
-import { PepaFlowOverview } from "@/components/pepa-flow-overview";
-import {
-  FinalPurchaseSnapshot,
-  derivePepaFinalPurchaseSnapshot,
-  derivePepaWorkflowTotals
-} from "@/lib/pepa-quotation-domain";
+import { derivePepaFinalPurchaseSnapshot } from "@/lib/pepa-quotation-domain";
 import { usePepaSnapshot } from "@/lib/use-pepa-snapshot";
 
 export default function PedidoFinalPepaPage() {
@@ -18,34 +13,32 @@ export default function PedidoFinalPepaPage() {
   const roundId = searchParams.get("roundId");
   const { snapshot: pepaSnapshot, isLoading, error } = usePepaSnapshot(roundId);
   const snapshot = derivePepaFinalPurchaseSnapshot(pepaSnapshot);
-  const workflowTotals = derivePepaWorkflowTotals(pepaSnapshot);
   const isClosedRound = pepaSnapshot.latestRound?.status === "closed";
-  const hasCriticalGaps =
-    snapshot.totals.pendingItems > 0 ||
-    workflowTotals.ocrQueue > 0 ||
-    workflowTotals.manualReviewCount > 0;
-  const canExportFinal = Boolean(pepaSnapshot.latestRound) && isClosedRound && !hasCriticalGaps;
+  const canExport = Boolean(pepaSnapshot.latestRound) && isClosedRound;
+
   const [exportState, setExportState] = useState<{ format: "csv" | "xlsx"; status: "idle" | "loading" } | null>(null);
   const [exportMessage, setExportMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
+  const [closingRound, setClosingRound] = useState(false);
+
+  async function handleCloseRound() {
+    if (!pepaSnapshot.latestRound) return;
+    setClosingRound(true);
+    const res = await fetch("/api/pepa/round-status", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roundId: pepaSnapshot.latestRound.id, status: "closed" })
+    });
+    if (res.ok) {
+      window.dispatchEvent(new Event("pepa-store-updated"));
+    }
+    setClosingRound(false);
+  }
 
   async function handleExport(format: "csv" | "xlsx") {
-    if (!canExportFinal) {
-      setExportMessage({
-        tone: "error",
-        text: !pepaSnapshot.latestRound
-          ? "Nenhuma rodada ativa disponivel para exportacao."
-          : !isClosedRound
-            ? "Feche a rodada antes de liberar a exportacao final."
-            : "Ainda existem pendencias criticas. Resolva OCR, revisoes manuais e itens pendentes antes da exportacao final."
-      });
-      return;
-    }
-
+    if (!canExport) return;
     setExportState({ format, status: "loading" });
-    setExportMessage({
-      tone: "info",
-      text: `Gerando arquivo ${format.toUpperCase()} da rodada atual.`
-    });
+    setExportMessage({ tone: "info", text: `Gerando arquivo ${format.toUpperCase()}...` });
 
     const response = await fetch(`/api/pepa/export?format=${format}${roundId ? `&roundId=${roundId}` : ""}`);
     if (!response.ok) {
@@ -54,10 +47,7 @@ export default function PedidoFinalPepaPage() {
         const payload = (await response.json()) as { error?: string };
         errorMessage = payload.error ?? errorMessage;
       } catch {}
-      setExportMessage({
-        tone: "error",
-        text: errorMessage
-      });
+      setExportMessage({ tone: "error", text: errorMessage });
       setExportState(null);
       return;
     }
@@ -71,185 +61,121 @@ export default function PedidoFinalPepaPage() {
     anchor.click();
     anchor.remove();
     URL.revokeObjectURL(url);
-    setExportMessage({
-      tone: "success",
-      text: `Arquivo ${format.toUpperCase()} gerado com sucesso.`
-    });
+    setExportMessage({ tone: "success", text: `Arquivo ${format.toUpperCase()} gerado com sucesso.` });
     setExportState(null);
   }
 
   return (
     <div>
-      <PageHeader
-        eyebrow="Pedido Final"
-        title="Consolidado final pronto para exportacao do comprador"
-        description="O pedido final agora nasce da ultima rodada real de cotacao, carregando fornecedor principal, termos comerciais e itens pendentes de revisao antes da exportacao."
-        action="Exportar pedido"
-      />
+      {/* Back button */}
+      <div className="mb-6">
+        <Link
+          href="/validacao-compra-pepa"
+          className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-brand-ink"
+        >
+          ← Voltar para Validacao
+        </Link>
+      </div>
 
-      {pepaSnapshot.latestRound ? (
-        <div className="mb-6 rounded-[28px] bg-brand-surface px-5 py-4 text-sm text-slate-600">
-          {isClosedRound
-            ? "Rodada fechada: exportacao liberada com trilha congelada para auditoria."
-            : "Rodada aberta: voce ainda pode voltar para a validacao e ajustar itens antes da exportacao final."}
-        </div>
-      ) : null}
+      <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">Pedido Final</div>
+      <h1 className="mb-6 text-2xl font-semibold text-brand-ink">Exportacao do pedido de compra</h1>
 
-      {pepaSnapshot.latestRound && !canExportFinal ? (
+      {isLoading && (
         <div className="mb-6">
-          <OperationFeedback
-            tone="warning"
-            title="Exportacao final bloqueada"
-            message={
-              !isClosedRound
-                ? "A rodada ainda esta aberta. Feche a rodada em cotacoes quando a validacao estiver concluida."
-                : `Ainda ha ${snapshot.totals.pendingItems} item(ns) pendente(s), ${workflowTotals.manualReviewCount} revisao(oes) manual(is) e ${workflowTotals.ocrQueue} arquivo(s) em OCR.`
-            }
-          />
+          <OperationFeedback tone="info" title="Carregando" message="Preparando pedido final..." />
         </div>
-      ) : null}
-
-      {isLoading ? (
+      )}
+      {error && (
         <div className="mb-6">
-          <OperationFeedback
-            tone="info"
-            title="Preparando pedido final"
-            message="Carregando consolidacao, termos comerciais e arquivos disponiveis para exportacao."
-          />
+          <OperationFeedback tone="error" title="Erro" message={error} />
         </div>
-      ) : null}
+      )}
 
-      {error ? (
-        <div className="mb-6">
-          <OperationFeedback tone="error" title="Falha ao carregar pedido final" message={error} />
+      {/* Bloqueio: rodada ainda aberta */}
+      {pepaSnapshot.latestRound && !isClosedRound && (
+        <div className="mb-6 rounded-[28px] border border-amber-200 bg-amber-50 p-5">
+          <p className="font-semibold text-amber-800">Exportacao bloqueada — rodada ainda aberta</p>
+          <p className="mt-1 text-sm text-amber-700">
+            Para exportar o pedido final, feche a rodada de cotacoes. Isso congela os dados para auditoria.
+          </p>
+          <button
+            onClick={() => void handleCloseRound()}
+            disabled={closingRound}
+            className="mt-4 rounded-full bg-amber-700 px-5 py-2.5 text-sm font-medium text-white hover:bg-amber-800 disabled:opacity-50"
+          >
+            {closingRound ? "Fechando..." : "Fechar rodada agora"}
+          </button>
         </div>
-      ) : null}
+      )}
 
-      {canExportFinal ? (
-        <div className="mb-6">
-          <OperationFeedback
-            tone="success"
-            title="Pacote liberado para saida"
-            message="A rodada esta fechada, sem lacunas criticas e pronta para gerar o arquivo final do comprador."
-          />
+      {/* Liberado */}
+      {canExport && (
+        <div className="mb-6 rounded-[28px] border border-green-200 bg-green-50 p-5">
+          <p className="font-semibold text-green-800">Rodada fechada — exportacao liberada</p>
+          <p className="mt-1 text-sm text-green-700">O pedido esta consolidado e pronto para exportacao.</p>
         </div>
-      ) : null}
+      )}
 
-      {exportMessage ? (
+      {exportMessage && (
         <div className="mb-6">
           <OperationFeedback
             tone={exportMessage.tone}
-            title={
-              exportMessage.tone === "success"
-                ? "Exportacao concluida"
-                : exportMessage.tone === "error"
-                  ? "Falha na exportacao"
-                  : "Gerando arquivo"
-            }
+            title={exportMessage.tone === "success" ? "Exportacao concluida" : exportMessage.tone === "error" ? "Erro" : "Gerando"}
             message={exportMessage.text}
           />
         </div>
-      ) : null}
+      )}
 
-      <PepaFlowOverview currentStep="pedido-final" totals={workflowTotals} />
-
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Pedido" value={snapshot.orderNumber} detail={`Espelho ${snapshot.mirrorNumber}`} />
-        <MetricCard label="Fornecedor principal" value={snapshot.supplierName} detail={snapshot.paymentTerms} />
-        <MetricCard label="Total consolidado" value={formatCurrency(snapshot.totals.totalValue)} detail={`${snapshot.totals.items} itens no pacote`} />
-        <MetricCard label="Status do lote" value={snapshot.totals.pendingItems === 0 ? "Liberado" : "Parcial"} detail={`${snapshot.totals.pendingItems} item(ns) ainda pendentes`} />
-      </section>
-
-      <section className="mt-6 grid gap-6 xl:grid-cols-[0.82fr_1.18fr]">
-        <article className="rounded-[32px] bg-white p-6 shadow-panel">
-          <p className="text-sm text-slate-500">Pacote de exportacao</p>
-          <h3 className="mt-1 text-xl font-semibold">Como o comprador fecha esse lote</h3>
-
-          <div className="mt-6 grid gap-4">
-            <ConnectorCard mode="file" active={snapshot.connectorMode === "file"} />
-            <ConnectorCard mode="review" active={snapshot.connectorMode === "review"} />
-            <ConnectorCard mode="archive" active={snapshot.connectorMode === "archive"} />
-          </div>
-
-          <div className="mt-6 rounded-[28px] bg-brand-surface p-5">
-            <p className="text-sm font-medium text-brand-ink">Observacoes do lote</p>
-            <div className="mt-4 grid gap-3 text-sm text-slate-600">
-              {snapshot.notes.map((note) => (
-                <p key={note}>{note}</p>
-              ))}
-            </div>
-          </div>
+      {/* Resumo do pedido */}
+      <section className="mb-6 grid gap-4 md:grid-cols-4">
+        <article className="rounded-[28px] bg-white p-5 shadow-panel">
+          <p className="text-sm text-slate-500">Pedido</p>
+          <p className="mt-2 text-xl font-semibold text-brand-ink">{snapshot.orderNumber}</p>
         </article>
-
-        <article className="rounded-[32px] bg-white p-6 shadow-panel">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-slate-500">Cabecalho do pedido</p>
-              <h3 className="mt-1 text-xl font-semibold">Pacote final para aprovacao e exportacao</h3>
-            </div>
-            <span className={statusClasses(snapshot.totals.pendingItems === 0 ? "ready" : "pending")}>
-              {canExportFinal ? "Pronto para exportar" : "Aguardando liberacao total"}
-            </span>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <SummaryBlock label="Comprador" value={snapshot.buyerName} />
-            <SummaryBlock label="Fornecedor" value={snapshot.supplierName} />
-            <SummaryBlock label="Pagamento" value={snapshot.paymentTerms} />
-            <SummaryBlock label="Frete" value={snapshot.freightTerms} />
-            <SummaryBlock label="Quantidade total" value={formatQuantity(snapshot.totals.totalQuantity)} />
-            <SummaryBlock label="Modo de saida" value={canExportFinal ? connectorLabel(snapshot.connectorMode) : "Bloqueado ate liberacao"} />
-          </div>
+        <article className="rounded-[28px] bg-white p-5 shadow-panel">
+          <p className="text-sm text-slate-500">Fornecedor principal</p>
+          <p className="mt-2 text-xl font-semibold text-brand-ink">{snapshot.supplierName}</p>
+          <p className="mt-1 text-sm text-slate-500">{snapshot.paymentTerms}</p>
+        </article>
+        <article className="rounded-[28px] bg-white p-5 shadow-panel">
+          <p className="text-sm text-slate-500">Total consolidado</p>
+          <p className="mt-2 text-xl font-semibold text-brand-ink">{formatCurrency(snapshot.totals.totalValue)}</p>
+          <p className="mt-1 text-sm text-slate-500">{snapshot.totals.items} itens</p>
+        </article>
+        <article className="rounded-[28px] bg-white p-5 shadow-panel">
+          <p className="text-sm text-slate-500">Status</p>
+          <p className={`mt-2 text-xl font-semibold ${isClosedRound ? "text-green-700" : "text-amber-600"}`}>
+            {isClosedRound ? "Rodada fechada" : "Rodada aberta"}
+          </p>
         </article>
       </section>
 
-      <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+      {/* Grade final */}
+      <section className="rounded-[32px] bg-white p-6 shadow-panel">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-slate-500">Linhas exportaveis</p>
-            <h3 className="mt-1 text-xl font-semibold">Grade final para exportacao do comprador</h3>
-            <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-500">
-              Esta tabela representa o arquivo final do processo a partir da rodada mais recente. Os itens pendentes seguem visiveis para impedir exportacao cega com lacunas de cotacao ou de termos comerciais.
-            </p>
+            <h3 className="mt-1 text-xl font-semibold">Grade final para exportacao</h3>
           </div>
-          <div className="flex flex-wrap gap-3">
+          <div className="flex gap-3">
             <button
-              className="rounded-full bg-brand-blue/10 px-4 py-2 text-sm font-medium text-brand-blue disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={exportState?.status === "loading" || !canExportFinal}
+              className="rounded-full bg-brand-blue px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={exportState?.status === "loading" || !canExport}
               onClick={() => void handleExport("xlsx")}
             >
-              {exportState?.status === "loading" && exportState.format === "xlsx" ? "Gerando XLSX..." : "Exportar XLSX"}
+              {exportState?.status === "loading" && exportState.format === "xlsx" ? "Gerando..." : "Exportar XLSX"}
             </button>
             <button
-              className="rounded-full bg-slate-100 px-4 py-2 text-sm font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={exportState?.status === "loading" || !canExportFinal}
+              className="rounded-full bg-slate-100 px-5 py-2.5 text-sm font-medium text-slate-600 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={exportState?.status === "loading" || !canExport}
               onClick={() => void handleExport("csv")}
             >
-              {exportState?.status === "loading" && exportState.format === "csv" ? "Gerando CSV..." : "Exportar CSV"}
+              {exportState?.status === "loading" && exportState.format === "csv" ? "Gerando..." : "Exportar CSV"}
             </button>
           </div>
         </div>
 
-        {!canExportFinal ? (
-          <div className="mt-4">
-            <OperationFeedback
-              tone="warning"
-              title="Saida final ainda nao liberada"
-              message="A exportacao final fica bloqueada enquanto existir rodada aberta ou alguma lacuna critica de OCR, revisao manual ou item pendente."
-            />
-          </div>
-        ) : null}
-        {canExportFinal ? (
-          <div className="mt-4">
-            <OperationFeedback
-              tone="info"
-              title="Escolha o formato final"
-              message="Use XLSX quando o comprador precisar revisar e ajustar no Excel; use CSV quando o destino exigir ingestao direta ou importacao simples."
-            />
-          </div>
-        ) : null}
-
-        <div className="mt-6 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-y-3">
             <thead>
               <tr className="text-left text-xs uppercase tracking-[0.2em] text-brand-muted">
@@ -263,19 +189,31 @@ export default function PedidoFinalPepaPage() {
               </tr>
             </thead>
             <tbody>
-              {snapshot.rows.map((row) => (
-                <tr key={`${row.sku}-${row.description}`} className="bg-brand-surface text-sm text-slate-600">
-                  <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
-                  <td className="px-4 py-4">{row.description}</td>
-                  <td className="px-4 py-4">{formatQuantity(row.quantity)}</td>
-                  <td className="px-4 py-4">{row.supplier}</td>
-                  <td className="px-4 py-4">{formatCurrency(row.unitPrice)}</td>
-                  <td className="px-4 py-4">{formatCurrency(row.total)}</td>
-                  <td className="rounded-r-[24px] px-4 py-4">
-                    <span className={statusClasses(row.status)}>{row.status === "ready" ? "Pronto" : "Pendente"}</span>
+              {snapshot.rows.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="rounded-[24px] bg-brand-surface px-4 py-8 text-center text-sm text-slate-500">
+                    Nenhum item disponivel. Importe os arquivos na tela de Cotacoes.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                snapshot.rows.map((row) => (
+                  <tr key={`${row.sku}-${row.description}`} className="bg-brand-surface text-sm text-slate-600">
+                    <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                    <td className="px-4 py-4">{row.description}</td>
+                    <td className="px-4 py-4">{formatQuantity(row.quantity)}</td>
+                    <td className="px-4 py-4">{row.supplier}</td>
+                    <td className="px-4 py-4">{formatCurrency(row.unitPrice)}</td>
+                    <td className="px-4 py-4">{formatCurrency(row.total)}</td>
+                    <td className="rounded-r-[24px] px-4 py-4">
+                      <span className={row.status === "ready"
+                        ? "inline-flex rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700"
+                        : "inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"}>
+                        {row.status === "ready" ? "Pronto" : "Pendente"}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
@@ -284,66 +222,10 @@ export default function PedidoFinalPepaPage() {
   );
 }
 
-function MetricCard(props: { label: string; value: string; detail: string }) {
-  return (
-    <article className="rounded-[28px] bg-white p-5 shadow-panel">
-      <p className="text-sm text-slate-500">{props.label}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-tight text-brand-ink">{props.value}</p>
-      <p className="mt-3 text-sm font-medium text-brand-blue">{props.detail}</p>
-    </article>
-  );
-}
-
-function SummaryBlock(props: { label: string; value: string }) {
-  return (
-    <div className="rounded-[24px] bg-brand-surface p-4">
-      <p className="text-xs uppercase tracking-[0.2em] text-brand-muted">{props.label}</p>
-      <p className="mt-2 text-sm font-medium text-brand-ink">{props.value}</p>
-    </div>
-  );
-}
-
-function ConnectorCard(props: { mode: FinalPurchaseSnapshot["connectorMode"]; active: boolean }) {
-  const descriptions = {
-    file: "Gera um pacote Excel ou CSV mantendo a ordem do arquivo-base importado do Flex.",
-    review: "Gera uma visao final para conferencia do comprador antes do fechamento do pedido.",
-    archive: "Mantem historico da rodada de cotacao, anexos recebidos e justificativas da decisao."
-  };
-
-  return (
-    <div className={["rounded-[28px] border p-5", props.active ? "border-brand-blue bg-brand-blue/5" : "border-slate-100 bg-white"].join(" ")}>
-      <div className="flex items-center justify-between gap-3">
-        <h4 className="text-lg font-semibold text-brand-ink">{connectorLabel(props.mode)}</h4>
-        <span className={props.active ? statusClasses("ready") : "rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500"}>
-          {props.active ? "Modo ativo" : "Disponivel"}
-        </span>
-      </div>
-      <p className="mt-3 text-sm leading-6 text-slate-600">{descriptions[props.mode]}</p>
-    </div>
-  );
-}
-
-function connectorLabel(mode: FinalPurchaseSnapshot["connectorMode"]) {
-  if (mode === "file") {
-    return "Exportacao por arquivo";
-  }
-  if (mode === "review") {
-    return "Revisao final";
-  }
-  return "Historico da rodada";
-}
-
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
 }
 
 function formatQuantity(value: number): string {
   return new Intl.NumberFormat("pt-BR").format(value);
-}
-
-function statusClasses(status: "ready" | "pending") {
-  if (status === "ready") {
-    return "inline-flex rounded-full bg-brand-success/10 px-3 py-1 text-xs font-semibold text-brand-success";
-  }
-  return "inline-flex rounded-full bg-brand-attention/10 px-3 py-1 text-xs font-semibold text-brand-attention";
 }
