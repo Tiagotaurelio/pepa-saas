@@ -546,8 +546,8 @@ function hasQuantityDivergence(row: { requestedQuantity: number; offers?: { quot
 }
 
 function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[]; selectionMode?: string }) {
-  // Price accepted manually — only exits if quantity is also resolved
-  if (row.selectionMode === "manual") return hasQuantityDivergence(row);
+  // User made a conscious decision (accepted or adjusted) — all divergences resolved
+  if (row.selectionMode === "manual") return false;
   return hasPriceDivergence(row) || hasQuantityDivergence(row);
 }
 
