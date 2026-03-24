@@ -379,7 +379,7 @@ export default function CotacoesPepaPage() {
                               Revisado
                             </span>
                           )}
-                          {anyDivergence && snapshot.latestRound && (
+                          {priceDivergence && snapshot.latestRound && (
                             <div className="mt-1 flex flex-col gap-1">
                               {editingRowKey === rowKey ? (
                                 <div className="flex items-center gap-1">
@@ -509,7 +509,8 @@ function hasQuantityDivergence(row: { requestedQuantity: number; offers?: { quot
   return Math.abs(offer.quotedQuantity - row.requestedQuantity) > 0.001;
 }
 
-function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[] }) {
+function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[]; selectionMode?: string }) {
+  if (row.selectionMode === "manual") return false;
   return hasPriceDivergence(row) || hasQuantityDivergence(row);
 }
 
