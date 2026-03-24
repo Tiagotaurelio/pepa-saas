@@ -9,6 +9,7 @@ type SelectionPayload = {
   description: string;
   supplierName: string | null;
   unitPrice?: number | null;
+  quantity?: number | null;
 };
 
 export async function POST(request: NextRequest) {
@@ -29,7 +30,8 @@ export async function POST(request: NextRequest) {
       sku: body.sku,
       description: body.description,
       supplierName: body.supplierName ?? null,
-      unitPrice: typeof body.unitPrice === "number" ? body.unitPrice : null
+      unitPrice: typeof body.unitPrice === "number" ? body.unitPrice : null,
+      quantity: typeof body.quantity === "number" ? body.quantity : null
     });
 
     return NextResponse.json({ snapshot });

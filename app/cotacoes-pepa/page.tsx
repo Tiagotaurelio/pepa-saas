@@ -23,6 +23,8 @@ export default function CotacoesPepaPage() {
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [adjustedPrice, setAdjustedPrice] = useState("");
   const [expandedOffersKey, setExpandedOffersKey] = useState<string | null>(null);
+  const [editingQtyKey, setEditingQtyKey] = useState<string | null>(null);
+  const [adjustedQty, setAdjustedQty] = useState("");
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -32,7 +34,7 @@ export default function CotacoesPepaPage() {
     return () => window.removeEventListener("pepa-auth-expired", handleAuthExpired);
   }, []);
 
-  async function saveSelection(sku: string, description: string, supplierName: string | null, unitPrice: number | null) {
+  async function saveSelection(sku: string, description: string, supplierName: string | null, unitPrice: number | null, quantity?: number | null) {
     if (!snapshot.latestRound) return;
     const rowKey = `${sku}-${description}`;
     setSavingRowKey(rowKey);
@@ -41,13 +43,15 @@ export default function CotacoesPepaPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ roundId: snapshot.latestRound.id, sku, description, supplierName, unitPrice })
+        body: JSON.stringify({ roundId: snapshot.latestRound.id, sku, description, supplierName, unitPrice, quantity })
       });
       if (res.ok) window.dispatchEvent(new Event("pepa-store-updated"));
     } finally {
       setSavingRowKey(null);
       setEditingRowKey(null);
       setAdjustedPrice("");
+      setEditingQtyKey(null);
+      setAdjustedQty("");
     }
   }
 
@@ -294,6 +298,46 @@ export default function CotacoesPepaPage() {
                               Cotado: {formatQuantity(offer.quotedQuantity)}
                             </span>
                           )}
+                          {qtyDivergence && snapshot.latestRound && (
+                            editingQtyKey === rowKey ? (
+                              <div className="flex items-center gap-1">
+                                <input
+                                  type="number"
+                                  value={adjustedQty}
+                                  onChange={(e) => setAdjustedQty(e.target.value)}
+                                  className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                                  placeholder="Qtd"
+                                  autoFocus
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const qty = Number(adjustedQty);
+                                    if (qty > 0) void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, qty);
+                                  }}
+                                  disabled={savingRowKey === rowKey}
+                                  className="rounded-lg bg-brand-blue px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                                >
+                                  OK
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => { setEditingQtyKey(null); setAdjustedQty(""); }}
+                                  className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => { setEditingQtyKey(rowKey); setAdjustedQty(String(row.requestedQuantity)); }}
+                                className="inline-flex w-fit rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+                              >
+                                Ajustar qtd
+                              </button>
+                            )
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-4">{row.unit}</td>
@@ -438,6 +482,17 @@ export default function CotacoesPepaPage() {
             </tbody>
           </table>
         </div>
+
+        {snapshot.comparisonRows.length > 0 && (
+          <div className="mt-6 flex justify-end">
+            <a
+              href="/validacao-compra-pepa"
+              className="rounded-full bg-brand-blue px-6 py-3 text-sm font-medium text-white shadow-panel hover:opacity-90"
+            >
+              Ir para Validacao →
+            </a>
+          </div>
+        )}
       </section>
     </div>
   );

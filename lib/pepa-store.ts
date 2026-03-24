@@ -108,6 +108,7 @@ export async function updateComparisonSelection(params: {
   description: string;
   supplierName: string | null;
   unitPrice?: number | null;
+  quantity?: number | null;
 }) {
   const snapshot = await readPepaSnapshot(params.tenantId, params.roundId);
   if (!snapshot.latestRound || snapshot.latestRound.id !== params.roundId) {
@@ -138,15 +139,15 @@ export async function updateComparisonSelection(params: {
       return row;
     }
 
+    const finalUnitPrice = typeof params.unitPrice === "number" && params.unitPrice > 0 ? params.unitPrice : chosenOffer.unitPrice;
+    const finalQuantity = typeof params.quantity === "number" && params.quantity > 0 ? params.quantity : row.requestedQuantity;
+
     return {
       ...row,
+      requestedQuantity: finalQuantity,
       bestSupplier: chosenOffer.supplierName,
-      bestUnitPrice:
-        typeof params.unitPrice === "number" && params.unitPrice > 0 ? params.unitPrice : chosenOffer.unitPrice,
-      bestTotal: roundCurrency(
-        row.requestedQuantity *
-          (typeof params.unitPrice === "number" && params.unitPrice > 0 ? params.unitPrice : chosenOffer.unitPrice)
-      ),
+      bestUnitPrice: finalUnitPrice,
+      bestTotal: roundCurrency(finalQuantity * finalUnitPrice),
       itemStatus: "quoted" as const,
       selectionMode: "manual" as const
     };
