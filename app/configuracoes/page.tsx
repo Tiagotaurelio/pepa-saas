@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
 export default function ConfiguracoesPage() {
+  const router = useRouter();
   const [companyName, setCompanyName] = useState("");
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +40,7 @@ export default function ConfiguracoesPage() {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
         window.dispatchEvent(new CustomEvent("company-name-updated", { detail: { name: companyName.trim() } }));
+        router.refresh();
       }
     } catch {
       setError("Erro ao salvar.");

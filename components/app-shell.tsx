@@ -18,6 +18,10 @@ export function AppShell({ children, tenantName, userName }: AppShellProps) {
   const [displayTenantName, setDisplayTenantName] = useState(tenantName);
 
   useEffect(() => {
+    if (tenantName) setDisplayTenantName(tenantName);
+  }, [tenantName]);
+
+  useEffect(() => {
     function onNameUpdated(e: Event) {
       const detail = (e as CustomEvent<{ name: string }>).detail;
       if (detail?.name) setDisplayTenantName(detail.name);
