@@ -2,17 +2,6 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-
 import { OperationFeedback } from "@/components/operation-feedback";
 import { derivePepaPurchaseValidationSnapshot } from "@/lib/pepa-quotation-domain";
 import { usePepaSnapshot } from "@/lib/use-pepa-snapshot";
@@ -97,76 +86,6 @@ export default function ValidacaoCompraPepaPage() {
           </p>
         </article>
       </section>
-
-      {/* Price comparison chart */}
-      {(() => {
-        const chartData = pepaSnapshot.comparisonRows
-          .filter((r) => r.baseUnitPrice != null && r.bestUnitPrice != null)
-          .map((r) => ({
-            name: r.sku,
-            label: r.description.split(" ").slice(0, 3).join(" "),
-            flex: r.baseUnitPrice!,
-            cotado: r.bestUnitPrice!,
-            diff: r.bestUnitPrice! - r.baseUnitPrice!
-          }));
-        if (chartData.length === 0) return null;
-        return (
-          <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
-            <p className="text-sm text-slate-500">Comparativo visual</p>
-            <h3 className="mt-1 mb-5 text-xl font-semibold">Preco Flex vs Cotado por item</h3>
-            <div className="overflow-x-auto">
-              <div style={{ width: Math.max(chartData.length * 60, 600), height: 240 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} barGap={2} barCategoryGap="28%">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fontSize: 10, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: "#94a3b8" }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v: number) =>
-                        new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v)
-                      }
-                      width={68}
-                    />
-                    <Tooltip
-                      formatter={(value, name) => [
-                        new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value)),
-                        name === "flex" ? "Preco Flex" : "Preco Cotado"
-                      ]}
-                      labelFormatter={(label) => {
-                        const item = chartData.find((d) => d.name === label);
-                        return item ? `${label} — ${item.label}` : label;
-                      }}
-                      contentStyle={{ borderRadius: 16, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.10)", fontSize: 12 }}
-                    />
-                    <Bar dataKey="flex" name="flex" fill="#cbd5e1" radius={[6, 6, 0, 0]} />
-                    <Bar dataKey="cotado" name="cotado" radius={[6, 6, 0, 0]}>
-                      {chartData.map((entry, index) => (
-                        <Cell
-                          key={index}
-                          fill={entry.diff < -0.005 ? "#22c55e" : entry.diff > 0.005 ? "#ef4444" : "#3b82f6"}
-                        />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-            <div className="mt-3 flex items-center gap-5 text-xs text-slate-400">
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-slate-300" /> Preco Flex</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-green-500" /> Cotado abaixo</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500" /> Cotado acima</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500" /> Preco igual</span>
-            </div>
-          </section>
-        );
-      })()}
 
       {/* Itens com pendencia */}
       <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
