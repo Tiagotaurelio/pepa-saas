@@ -527,10 +527,11 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   // Parser dedicado para PDF de orçamento do fornecedor
   if (file.name.toLowerCase().endsWith(".pdf")) {
     const lines = await extractTextLines(file);
+    const pdfSupplierName = extractSupplierNameFromPdfLines(lines) ?? supplierName;
     const quoteItems = parseSupplierQuotePdfLines(lines);
     if (quoteItems.length > 0) {
       return {
-        supplierName,
+        supplierName: pdfSupplierName,
         sourceFile: file.name,
         extractionStatus: "parsed",
         detectedFormat: "pdf",
@@ -832,13 +833,28 @@ function describeStorage(meta: StoredUploadMeta | undefined) {
 }
 
 function inferSupplierName(fileName: string) {
-  const withoutExt = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
-  // Strip common Brazilian document-type prefixes that precede the supplier name
-  const stripped = withoutExt.replace(
-    /^(or[cç]amento|cotac[aã]o|proposta|pedido|fatura|nota\s+fiscal|orc)\s+/i,
-    ""
-  ).trim();
-  return stripped || withoutExt || "Fornecedor";
+  return fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Fornecedor";
+}
+
+function extractSupplierNameFromPdfLines(lines: string[]): string | null {
+  for (const line of lines.slice(0, 30)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length < 4) continue;
+    if (looksLikeAddressOrMeta(trimmed)) continue;
+    if (/^\d+$/.test(trimmed)) continue;
+    // Likely a company name if it has letters and is reasonably long
+    if (/[A-Za-z]{3}/.test(trimmed) && trimmed.length >= 4) {
+      return trimmed;
+    }
+  }
+  return null;
+}
+
+function looksLikeAddressOrMeta(value: string): boolean {
+  return /^(rua|avenida|av\b|al\b|alameda|r\.\s|estrada|rodovia|travessa|cep\b|cnpj|bairro|fone|telefone|fax|e-mail|site\b|inscr|ie\b|www\.)/i.test(value.trim())
+    || /\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}/.test(value)
+    || /\d{5}-\d{3}/.test(value)
+    || /\(\d{2}\)\s*[\d\s-]{8,}/.test(value);
 }
 
 function sanitizeFileName(fileName: string) {
@@ -1125,7 +1141,7 @@ function inferRequestedItemFromColumns(columns: string[]): RequestedItem | null 
 
 function inferRequestedItemFromLine(line: string): RequestedItem | null {
   const compact = line.replace(/\s+/g, " ").trim();
-  if (!compact || looksLikeHeader(compact)) {
+  if (!compact || looksLikeHeader(compact) || looksLikeAddressOrMeta(compact)) {
     return null;
   }
 
@@ -1229,7 +1245,7 @@ function inferSupplierQuoteRowFromColumns(columns: string[]): SupplierQuoteRow |
 
 function inferSupplierQuoteRowFromLine(line: string): SupplierQuoteRow | null {
   const compact = line.replace(/\s+/g, " ").trim();
-  if (!compact || looksLikeHeader(compact)) {
+  if (!compact || looksLikeHeader(compact) || looksLikeAddressOrMeta(compact)) {
     return null;
   }
 
