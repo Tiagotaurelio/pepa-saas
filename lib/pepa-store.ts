@@ -837,13 +837,24 @@ function inferSupplierName(fileName: string) {
 }
 
 function extractSupplierNameFromPdfLines(lines: string[]): string | null {
-  for (const line of lines.slice(0, 30)) {
+  // Search only before the "CLIENTE" section (client address block)
+  const clienteIdx = lines.findIndex((l) => /^cliente\b/i.test(l.trim()));
+  const searchLines = clienteIdx > 2 ? lines.slice(0, clienteIdx) : lines.slice(0, 30);
+
+  for (const line of searchLines) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.length < 4) continue;
     if (looksLikeAddressOrMeta(trimmed)) continue;
-    if (/^\d+$/.test(trimmed)) continue;
-    // Likely a company name if it has letters and is reasonably long
-    if (/[A-Za-z]{3}/.test(trimmed) && trimmed.length >= 4) {
+    // Skip lines that start with a number (dates, quote numbers like "11/3/2026", "28/42/56/70")
+    if (/^\d/.test(trimmed)) continue;
+    // Skip document-title lines ("ORÇAMENTO VÁLIDO POR ...", "COTAÇÃO VÁLIDA ...")
+    if (/^or[cç]amento\b/i.test(trimmed)) continue;
+    if (/^cota[cç][aã]o\b/i.test(trimmed)) continue;
+    if (/válido por/i.test(trimmed)) continue;
+    // Skip section labels
+    if (/^(cliente|vendedor|prazo|emissao|validade|comprador|fornecedor)\s*$/i.test(trimmed)) continue;
+    // Must look like a company name (has letters, not all punctuation/numbers)
+    if (/[A-Za-zÀ-ÿ]{3}/.test(trimmed)) {
       return trimmed;
     }
   }
