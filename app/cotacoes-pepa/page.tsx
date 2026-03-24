@@ -2,6 +2,17 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 
 import { OperationFeedback } from "@/components/operation-feedback";
 import { usePepaSnapshot } from "@/lib/use-pepa-snapshot";
@@ -251,6 +262,72 @@ export default function CotacoesPepaPage() {
           </div>
         </div>
 
+        {/* Price comparison chart */}
+        {(() => {
+          const chartData = snapshot.comparisonRows
+            .filter((r) => r.baseUnitPrice != null && r.bestUnitPrice != null)
+            .map((r) => ({
+              name: r.sku,
+              flex: r.baseUnitPrice!,
+              cotado: r.bestUnitPrice!,
+              diff: r.bestUnitPrice! - r.baseUnitPrice!
+            }));
+          if (chartData.length === 0) return null;
+          return (
+            <div className="mt-6">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+                Comparativo visual — Preco Flex vs Cotado por item
+              </p>
+              <div className="overflow-x-auto">
+                <div style={{ width: Math.max(chartData.length * 56, 600), height: 220 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} barGap={2} barCategoryGap="25%">
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 10, fill: "#94a3b8" }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <YAxis
+                        tick={{ fontSize: 10, fill: "#94a3b8" }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v: number) =>
+                          new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v)
+                        }
+                        width={64}
+                      />
+                      <Tooltip
+                        formatter={(value, name) => [
+                          new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(value)),
+                          name === "flex" ? "Preco Flex" : "Preco Cotado"
+                        ]}
+                        contentStyle={{ borderRadius: 16, border: "none", boxShadow: "0 4px 24px rgba(0,0,0,0.10)", fontSize: 12 }}
+                      />
+                      <Bar dataKey="flex" name="flex" fill="#cbd5e1" radius={[6, 6, 0, 0]} />
+                      <Bar dataKey="cotado" name="cotado" radius={[6, 6, 0, 0]}>
+                        {chartData.map((entry, index) => (
+                          <Cell
+                            key={index}
+                            fill={entry.diff < -0.005 ? "#22c55e" : entry.diff > 0.005 ? "#ef4444" : "#3b82f6"}
+                          />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="mt-2 flex items-center gap-4 text-xs text-slate-400">
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-slate-300" /> Preco Flex</span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-green-500" /> Cotado abaixo</span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500" /> Cotado acima</span>
+                <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-500" /> Igual</span>
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="mt-6 overflow-x-auto">
           <table className="min-w-full border-separate border-spacing-y-3">
             <thead>
@@ -275,6 +352,7 @@ export default function CotacoesPepaPage() {
                   </td>
                 </tr>
               )}
+              <AnimatePresence initial={false}>
               {snapshot.comparisonRows
                 .filter((row) => !showOnlyDivergences || hasDivergence(row))
                 .flatMap((row) => {
@@ -288,7 +366,15 @@ export default function CotacoesPepaPage() {
                   const isExpanded = expandedOffersKey === rowKey;
 
                   const mainRow = (
-                    <tr key={rowKey} className={`rounded-[24px] ${rowBg} text-sm text-slate-600`}>
+                    <motion.tr
+                      key={rowKey}
+                      layout
+                      initial={{ opacity: 0, scale: 0.97 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.25 } }}
+                      transition={{ duration: 0.2 }}
+                      className={`rounded-[24px] ${rowBg} text-sm text-slate-600`}
+                    >
                       <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
                       <td className="px-4 py-4">{row.description}</td>
                       <td className="px-4 py-4">
@@ -438,7 +524,7 @@ export default function CotacoesPepaPage() {
                           )}
                         </div>
                       </td>
-                    </tr>
+                    </motion.tr>
                   );
 
                   const expandedRow = isExpanded && hasMultipleOffers ? (
@@ -484,6 +570,7 @@ export default function CotacoesPepaPage() {
 
                   return [mainRow, expandedRow].filter((r): r is React.JSX.Element => r !== null);
                 })}
+              </AnimatePresence>
             </tbody>
           </table>
         </div>
