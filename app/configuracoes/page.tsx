@@ -37,6 +37,7 @@ export default function ConfiguracoesPage() {
       } else {
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
+        window.dispatchEvent(new CustomEvent("company-name-updated", { detail: { name: companyName.trim() } }));
       }
     } catch {
       setError("Erro ao salvar.");

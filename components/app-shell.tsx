@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ReactNode } from "react";
+import { ReactNode, useEffect, useState } from "react";
 
 import { navigation } from "@/lib/navigation";
 
@@ -15,6 +15,16 @@ type AppShellProps = {
 export function AppShell({ children, tenantName, userName }: AppShellProps) {
   const pathname = usePathname();
   const hideChrome = pathname === "/login";
+  const [displayTenantName, setDisplayTenantName] = useState(tenantName);
+
+  useEffect(() => {
+    function onNameUpdated(e: Event) {
+      const detail = (e as CustomEvent<{ name: string }>).detail;
+      if (detail?.name) setDisplayTenantName(detail.name);
+    }
+    window.addEventListener("company-name-updated", onNameUpdated);
+    return () => window.removeEventListener("company-name-updated", onNameUpdated);
+  }, []);
 
   async function handleLogout() {
     await fetch("/api/auth/logout", {
@@ -35,7 +45,7 @@ export function AppShell({ children, tenantName, userName }: AppShellProps) {
             <p className="text-xs font-semibold uppercase tracking-[0.24em] text-brand-muted">
               PEPA
             </p>
-            <h1 className="mt-2 text-2xl font-semibold">Cotacao de Compras</h1>
+            <h1 className="mt-2 text-2xl font-semibold">{displayTenantName ?? "Cotacao de Compras"}</h1>
             <p className="mt-2 text-sm text-slate-500">
               Comparativo de fornecedores e gestao de pedidos de compra.
             </p>
