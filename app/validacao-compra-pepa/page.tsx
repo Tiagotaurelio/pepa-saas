@@ -17,7 +17,8 @@ export default function ValidacaoCompraPepaPage() {
   const [operationMessage, setOperationMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
   const divergentItems = snapshot.decisions.filter((item) =>
-    item.baseUnitPrice != null && Math.abs(item.chosenUnitPrice - item.baseUnitPrice) > 0.001
+    item.baseUnitPrice != null &&
+    Math.round(item.chosenUnitPrice * 100) !== Math.round(item.baseUnitPrice * 100)
   );
 
   const flexTotal = snapshot.decisions.reduce((sum, item) => {
