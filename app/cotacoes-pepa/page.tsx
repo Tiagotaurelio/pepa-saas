@@ -10,6 +10,7 @@ export default function CotacoesPepaPage() {
   const searchParams = useSearchParams();
   const roundId = searchParams.get("roundId");
   const { snapshot, isLoading: isLoadingSnapshot, error: snapshotError } = usePepaSnapshot(roundId);
+  const isClosedRound = snapshot.latestRound?.status === "closed";
   const mirrorInputRef = useRef<HTMLInputElement | null>(null);
   const supplierInputRef = useRef<HTMLInputElement | null>(null);
   const [mirrorFile, setMirrorFile] = useState<File | null>(null);
@@ -298,7 +299,7 @@ export default function CotacoesPepaPage() {
                               Cotado: {formatQuantity(offer.quotedQuantity)}
                             </span>
                           )}
-                          {qtyDivergence && snapshot.latestRound && (
+                          {qtyDivergence && snapshot.latestRound && !isClosedRound && (
                             editingQtyKey === rowKey ? (
                               <div className="flex items-center gap-1">
                                 <input
@@ -379,7 +380,7 @@ export default function CotacoesPepaPage() {
                               Revisado
                             </span>
                           )}
-                          {priceDivergence && snapshot.latestRound && (
+                          {priceDivergence && snapshot.latestRound && !isClosedRound && (
                             <div className="mt-1 flex flex-col gap-1">
                               {editingRowKey === rowKey ? (
                                 <div className="flex items-center gap-1">
@@ -459,7 +460,7 @@ export default function CotacoesPepaPage() {
                                     Selecionado
                                   </span>
                                 )}
-                                {snapshot.latestRound && o.supplierName !== row.bestSupplier && (
+                                {snapshot.latestRound && !isClosedRound && o.supplierName !== row.bestSupplier && (
                                   <button
                                     type="button"
                                     disabled={savingRowKey === rowKey}
@@ -486,6 +487,19 @@ export default function CotacoesPepaPage() {
         {snapshot.comparisonRows.length > 0 && (() => {
           const pendingCount = snapshot.comparisonRows.filter(hasDivergence).length;
           const allResolved = pendingCount === 0;
+          if (isClosedRound) {
+            return (
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <span className="text-sm text-slate-500">Rodada fechada — ajustes bloqueados</span>
+                <a
+                  href="/pedido-final-pepa"
+                  className="rounded-full bg-brand-blue px-6 py-3 text-sm font-medium text-white shadow-panel hover:opacity-90"
+                >
+                  Ir para Pedido Final →
+                </a>
+              </div>
+            );
+          }
           return (
             <div className="mt-6 flex items-center justify-end gap-3">
               {!allResolved && (
