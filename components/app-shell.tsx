@@ -81,13 +81,14 @@ export function AppShell({ children, tenantName, userName }: AppShellProps) {
                   {tenantName ?? "Tenant"}
                 </div>
                 {userName ? (
-                  <button
-                    className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-                    onClick={handleLogout}
-                  >
-                    {userName}
-                  </button>
+                  <span className="text-sm text-slate-600">{userName}</span>
                 ) : null}
+                <button
+                  className="rounded-full bg-red-50 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-100"
+                  onClick={handleLogout}
+                >
+                  Sair
+                </button>
               </div>
             </div>
           </div>
