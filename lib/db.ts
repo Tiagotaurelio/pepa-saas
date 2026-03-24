@@ -526,6 +526,36 @@ export async function updatePepaSnapshot(params: {
   ).run(JSON.stringify(params.snapshot), params.roundId, params.tenantId);
 }
 
+export async function getTenantName(tenantId: string): Promise<string | null> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const result = await getPostgresPool().query<{ name: string }>(
+      `select name from ${pgTable("tenants")} where id = $1`,
+      [tenantId]
+    );
+    return result.rows[0]?.name ?? null;
+  }
+
+  const db = getSqlite();
+  const row = db.prepare("select name from tenants where id = ?").get(tenantId) as { name: string } | undefined;
+  return row?.name ?? null;
+}
+
+export async function updateTenantName(tenantId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) {
+    throw new Error("Nome da empresa nao pode ser vazio.");
+  }
+
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    await getPostgresPool().query(`update ${pgTable("tenants")} set name = $1 where id = $2`, [trimmed, tenantId]);
+    return;
+  }
+
+  getSqlite().prepare("update tenants set name = ? where id = ?").run(trimmed, tenantId);
+}
+
 function hashPassword(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
