@@ -415,7 +415,11 @@ export default function CotacoesPepaPage() {
                                 <>
                                   <button
                                     type="button"
-                                    onClick={() => void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice)}
+                                    onClick={() => {
+                                      // Accept price AND quoted quantity in one action
+                                      const acceptedQty = qtyDivergence ? (offer?.quotedQuantity ?? undefined) : undefined;
+                                      void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, acceptedQty);
+                                    }}
                                     disabled={savingRowKey === rowKey}
                                     className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
                                   >
