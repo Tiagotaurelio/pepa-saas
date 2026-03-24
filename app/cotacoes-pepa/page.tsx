@@ -302,54 +302,54 @@ export default function CotacoesPepaPage() {
                       <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
                       <td className="px-4 py-4">{row.description}</td>
                       <td className="px-4 py-4">
-                        <div className="flex flex-col gap-1">
-                          <span>{formatQuantity(row.requestedQuantity)} {row.unit}</span>
-                          {qtyDivergence && offer?.quotedQuantity != null && (
-                            <span className="inline-flex w-fit rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
-                              Cotado: {formatQuantity(offer.quotedQuantity)}
-                            </span>
-                          )}
-                          {qtyDivergence && snapshot.latestRound && !isClosedRound && (
-                            editingQtyKey === rowKey ? (
-                              <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  value={adjustedQty}
-                                  onChange={(e) => setAdjustedQty(e.target.value)}
-                                  className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-blue"
-                                  placeholder="Qtd"
-                                  autoFocus
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const qty = Number(adjustedQty);
-                                    if (qty > 0) void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, qty);
-                                  }}
-                                  disabled={savingRowKey === rowKey}
-                                  className="rounded-lg bg-brand-blue px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                                >
-                                  OK
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => { setEditingQtyKey(null); setAdjustedQty(""); }}
-                                  className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => { setEditingQtyKey(rowKey); setAdjustedQty(String(row.requestedQuantity)); }}
-                                className="inline-flex w-fit rounded-full bg-orange-50 px-2 py-0.5 text-xs font-semibold text-orange-700 hover:bg-orange-100"
-                              >
-                                Ajustar qtd
-                              </button>
-                            )
-                          )}
-                        </div>
+                        {qtyDivergence && snapshot.latestRound && !isClosedRound && editingQtyKey === rowKey ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              value={adjustedQty}
+                              onChange={(e) => setAdjustedQty(e.target.value)}
+                              className="w-20 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                              placeholder="Qtd"
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const qty = Number(adjustedQty);
+                                if (qty > 0) void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, qty);
+                              }}
+                              disabled={savingRowKey === rowKey}
+                              className="rounded-lg bg-brand-blue px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
+                            >
+                              OK
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => { setEditingQtyKey(null); setAdjustedQty(""); }}
+                              className="rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-600"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span>{formatQuantity(row.requestedQuantity)} {row.unit}</span>
+                            {qtyDivergence && offer?.quotedQuantity != null && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
+                                Cotado: {formatQuantity(offer.quotedQuantity)}
+                                {snapshot.latestRound && !isClosedRound && (
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingQtyKey(rowKey); setAdjustedQty(String(row.requestedQuantity)); }}
+                                    className="underline hover:no-underline"
+                                  >
+                                    Ajustar
+                                  </button>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-4">{row.unit}</td>
                       <td className="px-4 py-4">
