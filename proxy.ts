@@ -21,12 +21,6 @@ export function proxy(request: NextRequest) {
     return response;
   }
 
-  if (hasSession && pathname === "/login") {
-    const response = NextResponse.redirect(new URL("/cotacoes-pepa", request.url));
-    response.headers.set("Cache-Control", "no-store, max-age=0");
-    return response;
-  }
-
   const response = NextResponse.next();
   if (pathname === "/" || pathname === "/login") {
     response.headers.set("Cache-Control", "no-store, max-age=0");
