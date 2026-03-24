@@ -833,29 +833,38 @@ function describeStorage(meta: StoredUploadMeta | undefined) {
 }
 
 function inferSupplierName(fileName: string) {
-  return fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Fornecedor";
+  const withoutExt = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  // Strip common Brazilian document-type prefixes that precede the supplier name
+  const stripped = withoutExt.replace(
+    /^(or[cç]amento|cotac[aã]o|cotacao|proposta|pedido|fatura|nota fiscal|orc)\s+/i,
+    ""
+  ).trim();
+  return stripped || withoutExt || "Fornecedor";
 }
 
 function extractSupplierNameFromPdfLines(lines: string[]): string | null {
-  // Search only before the "CLIENTE" section (client address block)
-  const clienteIdx = lines.findIndex((l) => /^cliente\b/i.test(l.trim()));
-  const searchLines = clienteIdx > 2 ? lines.slice(0, clienteIdx) : lines.slice(0, 30);
-
-  for (const line of searchLines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.length < 4) continue;
-    if (looksLikeAddressOrMeta(trimmed)) continue;
-    // Skip lines that start with a number (dates, quote numbers like "11/3/2026", "28/42/56/70")
-    if (/^\d/.test(trimmed)) continue;
-    // Skip document-title lines ("ORÇAMENTO VÁLIDO POR ...", "COTAÇÃO VÁLIDA ...")
-    if (/^or[cç]amento\b/i.test(trimmed)) continue;
-    if (/^cota[cç][aã]o\b/i.test(trimmed)) continue;
-    if (/válido por/i.test(trimmed)) continue;
-    // Skip section labels
-    if (/^(cliente|vendedor|prazo|emissao|validade|comprador|fornecedor)\s*$/i.test(trimmed)) continue;
-    // Must look like a company name (has letters, not all punctuation/numbers)
-    if (/[A-Za-zÀ-ÿ]{3}/.test(trimmed)) {
-      return trimmed;
+  // Strategy: look for lines immediately before "ORCAMENTO <number>" — that's where the
+  // supplier company name typically appears in Brazilian quote PDFs.
+  for (let i = 1; i < Math.min(lines.length, 40); i++) {
+    if (/^or[cç]amento\s+\d+/i.test((lines[i] ?? "").trim())) {
+      // Collect candidate lines before this one (within 6 lines)
+      const candidates: string[] = [];
+      for (let j = Math.max(0, i - 6); j < i; j++) {
+        const candidate = (lines[j] ?? "").trim();
+        if (!candidate || candidate.length < 3) continue;
+        if (looksLikeAddressOrMeta(candidate)) continue;
+        if (/^\d/.test(candidate)) continue;
+        if (/^or[cç]amento\b/i.test(candidate)) continue;
+        if (/v[aá]lido por/i.test(candidate)) continue;
+        if (/^(cliente|vendedor|prazo|emissao|validade)\s*$/i.test(candidate)) continue;
+        if (/[A-Za-zÀ-ÿ]{3}/.test(candidate)) {
+          candidates.push(candidate);
+        }
+      }
+      if (candidates.length > 0) {
+        // Join multi-line company names (e.g. "FERTAK" + "TOOLS" → "FERTAK TOOLS")
+        return candidates.join(" ");
+      }
     }
   }
   return null;
