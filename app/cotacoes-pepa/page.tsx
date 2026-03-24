@@ -483,16 +483,34 @@ export default function CotacoesPepaPage() {
           </table>
         </div>
 
-        {snapshot.comparisonRows.length > 0 && (
-          <div className="mt-6 flex justify-end">
-            <a
-              href="/validacao-compra-pepa"
-              className="rounded-full bg-brand-blue px-6 py-3 text-sm font-medium text-white shadow-panel hover:opacity-90"
-            >
-              Ir para Validacao →
-            </a>
-          </div>
-        )}
+        {snapshot.comparisonRows.length > 0 && (() => {
+          const pendingCount = snapshot.comparisonRows.filter(hasDivergence).length;
+          const allResolved = pendingCount === 0;
+          return (
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {!allResolved && (
+                <span className="text-sm text-slate-500">
+                  {pendingCount} divergencia(s) pendente(s) — revise os itens acima
+                </span>
+              )}
+              {allResolved ? (
+                <a
+                  href="/validacao-compra-pepa"
+                  className="rounded-full bg-brand-blue px-6 py-3 text-sm font-medium text-white shadow-panel hover:opacity-90"
+                >
+                  Ir para Validacao →
+                </a>
+              ) : (
+                <button
+                  disabled
+                  className="rounded-full bg-slate-200 px-6 py-3 text-sm font-medium text-slate-400 cursor-not-allowed"
+                >
+                  Ir para Validacao →
+                </button>
+              )}
+            </div>
+          );
+        })()}
       </section>
     </div>
   );
