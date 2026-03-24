@@ -16,9 +16,23 @@ export default function ValidacaoCompraPepaPage() {
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [operationMessage, setOperationMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
-  const divergentItems = snapshot.decisions.filter((item) =>
-    item.baseUnitPrice != null &&
-    Math.round(item.chosenUnitPrice * 100) !== Math.round(item.baseUnitPrice * 100)
+  function hasPriceDivergence(item: (typeof snapshot.decisions)[0]) {
+    return (
+      item.baseUnitPrice != null &&
+      Math.round(item.chosenUnitPrice * 100) !== Math.round(item.baseUnitPrice * 100)
+    );
+  }
+
+  function divergenceType(item: (typeof snapshot.decisions)[0]): string {
+    const noSupplier = item.chosenSupplier === "Aguardando definicao";
+    const priceDiv = hasPriceDivergence(item);
+    if (noSupplier) return "Sem fornecedor";
+    if (priceDiv) return "Preco divergente";
+    return "Pendente";
+  }
+
+  const divergentItems = snapshot.decisions.filter(
+    (item) => hasPriceDivergence(item) || item.chosenSupplier === "Aguardando definicao" || item.manualReview
   );
 
   const flexTotal = snapshot.decisions.reduce((sum, item) => {
@@ -106,11 +120,11 @@ export default function ValidacaoCompraPepaPage() {
       <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-slate-500">Divergencias de preco</p>
+            <p className="text-sm text-slate-500">Itens que precisam de atencao</p>
             <h3 className="mt-1 text-xl font-semibold">
               {divergentItems.length === 0
                 ? "Nenhuma divergencia encontrada"
-                : `${divergentItems.length} item(ns) com preco diferente do Flex`}
+                : `${divergentItems.length} item(ns) com divergencia ou pendencia`}
             </h3>
           </div>
           {isClosedRound && (
@@ -137,16 +151,24 @@ export default function ValidacaoCompraPepaPage() {
                   <th className="px-4">Preco Cotado</th>
                   <th className="px-4">Dif.</th>
                   <th className="px-4">Total cotado</th>
+                  <th className="px-4">Tipo</th>
                   <th className="px-4">Revisao</th>
                 </tr>
               </thead>
               <tbody>
                 {divergentItems.map((item) => {
-                  const diff = item.baseUnitPrice != null
+                  const priceDiv = hasPriceDivergence(item);
+                  const diff = item.baseUnitPrice != null && item.baseUnitPrice > 0
                     ? ((item.chosenUnitPrice - item.baseUnitPrice) / item.baseUnitPrice) * 100
                     : 0;
+                  const tipo = divergenceType(item);
+                  const rowBg = item.chosenSupplier === "Aguardando definicao"
+                    ? "bg-amber-50"
+                    : priceDiv
+                    ? "bg-red-50"
+                    : "bg-slate-50";
                   return (
-                    <tr key={`${item.sku}-${item.description}`} className="bg-red-50 text-sm text-slate-600">
+                    <tr key={`${item.sku}-${item.description}`} className={`${rowBg} text-sm text-slate-600`}>
                       <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{item.sku}</td>
                       <td className="px-4 py-4">{item.description}</td>
                       <td className="px-4 py-4">{formatQuantity(item.requestedQuantity)}</td>
@@ -177,13 +199,28 @@ export default function ValidacaoCompraPepaPage() {
                       <td className="px-4 py-4 text-slate-500">
                         {item.baseUnitPrice != null ? formatCurrency(item.baseUnitPrice) : "—"}
                       </td>
-                      <td className="px-4 py-4 font-medium text-red-700">{formatCurrency(item.chosenUnitPrice)}</td>
+                      <td className={`px-4 py-4 font-medium ${priceDiv ? "text-red-700" : "text-slate-700"}`}>
+                        {formatCurrency(item.chosenUnitPrice)}
+                      </td>
                       <td className="px-4 py-4">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${diff > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
-                          {diff >= 0 ? "+" : ""}{diff.toFixed(1)}%
-                        </span>
+                        {priceDiv ? (
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${diff > 0 ? "bg-red-100 text-red-700" : "bg-green-100 text-green-700"}`}>
+                            {diff >= 0 ? "+" : ""}{diff.toFixed(1)}%
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-4">{formatCurrency(item.chosenTotal)}</td>
+                      <td className="px-4 py-4">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          tipo === "Sem fornecedor" ? "bg-amber-100 text-amber-700" :
+                          tipo === "Preco divergente" ? "bg-red-100 text-red-700" :
+                          "bg-slate-100 text-slate-600"
+                        }`}>
+                          {tipo}
+                        </span>
+                      </td>
                       <td className="rounded-r-[24px] px-4 py-4">
                         <span className={item.manualReview
                           ? "inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700"

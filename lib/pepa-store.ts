@@ -832,7 +832,13 @@ function describeStorage(meta: StoredUploadMeta | undefined) {
 }
 
 function inferSupplierName(fileName: string) {
-  return fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Fornecedor";
+  const withoutExt = fileName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+  // Strip common Brazilian document-type prefixes that precede the supplier name
+  const stripped = withoutExt.replace(
+    /^(or[cç]amento|cotac[aã]o|proposta|pedido|fatura|nota\s+fiscal|orc)\s+/i,
+    ""
+  ).trim();
+  return stripped || withoutExt || "Fornecedor";
 }
 
 function sanitizeFileName(fileName: string) {
