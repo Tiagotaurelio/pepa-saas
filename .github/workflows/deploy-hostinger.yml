@@ -59,6 +59,7 @@ jobs:
             PEPA_OBJECT_STORAGE_MIRROR_LOCAL=${{ secrets.PEPA_OBJECT_STORAGE_MIRROR_LOCAL }}
             EOF
             cd "$DEPLOY_PATH"
+            rm -f middleware.ts
             docker build -t pepa-saas:latest .
             docker rm -f pepa-saas-hml >/dev/null 2>&1 || true
             for attempt in $(seq 1 30); do
