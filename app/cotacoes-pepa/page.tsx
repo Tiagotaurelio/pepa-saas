@@ -228,8 +228,14 @@ export default function CotacoesPepaPage() {
         )}
       </section>
 
-      {/* Mapa comparativo */}
-      <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
+      {/* Mapa comparativo — oculto quando rodada fechada */}
+      {isClosedRound ? (
+        <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
+          <p className="text-sm text-slate-500">Rodada anterior encerrada</p>
+          <p className="mt-1 text-slate-600">Importe novos arquivos acima para iniciar uma nova rodada de cotacao.</p>
+        </section>
+      ) : null}
+      {!isClosedRound && <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-slate-500">Mapa comparativo</p>
@@ -540,7 +546,7 @@ export default function CotacoesPepaPage() {
             </div>
           );
         })()}
-      </section>
+      </section>}
     </div>
   );
 }
