@@ -527,11 +527,10 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   // Parser dedicado para PDF de orçamento do fornecedor
   if (file.name.toLowerCase().endsWith(".pdf")) {
     const lines = await extractTextLines(file);
-    const pdfSupplierName = extractSupplierNameFromPdfLines(lines) ?? supplierName;
     const quoteItems = parseSupplierQuotePdfLines(lines);
     if (quoteItems.length > 0) {
       return {
-        supplierName: pdfSupplierName,
+        supplierName,
         sourceFile: file.name,
         extractionStatus: "parsed",
         detectedFormat: "pdf",
