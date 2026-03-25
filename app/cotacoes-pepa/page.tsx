@@ -27,6 +27,7 @@ export default function CotacoesPepaPage() {
   const [expandedOffersKey, setExpandedOffersKey] = useState<string | null>(null);
   const [editingQtyKey, setEditingQtyKey] = useState<string | null>(null);
   const [adjustedQty, setAdjustedQty] = useState("");
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -136,8 +137,17 @@ export default function CotacoesPepaPage() {
     setIsTogglingRound(false);
   }
 
+  function toggleRow(key: string) {
+    setSelectedRows((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  }
+
+  const visibleRows = snapshot.comparisonRows.filter((row) => !showOnlyDivergences || hasDivergence(row));
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedRows.has(`${r.sku}-${r.description}`));
+  const selectedRowsData = snapshot.comparisonRows.filter((row) => selectedRows.has(`${row.sku}-${row.description}`));
+
   return (
     <div>
+      <div id="pepa-screen-content">
       {/* Upload */}
       <section className="rounded-[32px] bg-white p-6 shadow-panel">
         <h2 className="text-xl font-semibold text-brand-ink">Importar arquivos</h2>
@@ -262,7 +272,19 @@ export default function CotacoesPepaPage() {
           <table className="min-w-full border-separate border-spacing-y-3">
             <thead>
               <tr className="text-left text-xs uppercase tracking-[0.2em] text-brand-muted">
-                <th className="px-4">SKU</th>
+                <th className="px-4 py-1">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={() => {
+                      if (allVisibleSelected) { setSelectedRows(new Set()); }
+                      else { setSelectedRows(new Set(visibleRows.map((r) => `${r.sku}-${r.description}`))); }
+                    }}
+                    className="h-4 w-4 rounded border-slate-300"
+                  />
+                </th>
+                <th className="px-4">SKU Pepa</th>
+                <th className="px-4">SKU Forn.</th>
                 <th className="px-4">Item</th>
                 <th className="px-4">Qtd pedida</th>
                 <th className="px-4">Unid.</th>
@@ -277,7 +299,7 @@ export default function CotacoesPepaPage() {
             <tbody>
               {snapshot.comparisonRows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="rounded-[24px] bg-brand-surface px-4 py-8 text-center text-sm text-slate-500">
+                  <td colSpan={12} className="rounded-[24px] bg-brand-surface px-4 py-8 text-center text-sm text-slate-500">
                     Nenhum item ainda. Importe o arquivo-base do Flex para iniciar o comparativo.
                   </td>
                 </tr>
@@ -305,7 +327,16 @@ export default function CotacoesPepaPage() {
                       transition={{ duration: 0.2 }}
                       className={`rounded-[24px] ${rowBg} text-sm text-slate-600`}
                     >
-                      <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                      <td className="rounded-l-[24px] px-4 py-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedRows.has(rowKey)}
+                          onChange={() => toggleRow(rowKey)}
+                          className="h-4 w-4 rounded border-slate-300"
+                        />
+                      </td>
+                      <td className="px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                      <td className="px-4 py-4 text-xs text-slate-500">{row.supplierRef ?? "—"}</td>
                       <td className="px-4 py-4">{row.description}</td>
                       <td className="px-4 py-4">
                         {qtyDivergence && snapshot.latestRound && !isClosedRound && editingQtyKey === rowKey ? (
@@ -459,7 +490,7 @@ export default function CotacoesPepaPage() {
 
                   const expandedRow = isExpanded && hasMultipleOffers ? (
                     <tr key={`${rowKey}-offers`} className="text-sm">
-                      <td colSpan={10} className="rounded-[24px] bg-blue-50 px-6 py-4">
+                      <td colSpan={12} className="rounded-[24px] bg-blue-50 px-6 py-4">
                         <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-blue-600">
                           Todas as ofertas para este item
                         </p>
@@ -505,6 +536,19 @@ export default function CotacoesPepaPage() {
           </table>
         </div>
 
+        {selectedRows.size > 0 && (
+          <div className="mt-4 flex items-center justify-between rounded-[20px] bg-blue-50 px-5 py-3">
+            <span className="text-sm font-medium text-blue-700">{selectedRows.size} iten(s) selecionado(s) para negociacao</span>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              className="rounded-full bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:opacity-90"
+            >
+              Exportar PDF para negociacao
+            </button>
+          </div>
+        )}
+
         {snapshot.comparisonRows.length > 0 && (() => {
           const pendingCount = snapshot.comparisonRows.filter(hasDivergence).length;
           const allResolved = pendingCount === 0;
@@ -547,6 +591,56 @@ export default function CotacoesPepaPage() {
           );
         })()}
       </section>}
+
+      </div>{/* fim pepa-screen-content */}
+
+      {/* Secao de impressao — visivel apenas no print */}
+      <div id="pepa-print-view" style={{ display: "none" }}>
+        {/* Cabecalho PEPA */}
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", borderBottom: "2px solid #172033", paddingBottom: "12px", marginBottom: "20px" }}>
+          <img src="/logo-pepa.png" alt="PEPA" style={{ height: "60px", objectFit: "contain" }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: "14px", color: "#172033" }}>PEPA DISTRIBUIDORA MAT. ELETRICOS E CONSTRUCAO LTDA</div>
+            <div style={{ fontSize: "11px", color: "#475569" }}>RUA TEODORICO PEDRO LINO 741 — BALNEARIO RINCAO - SC</div>
+            <div style={{ fontSize: "11px", color: "#475569" }}>Fone: 48 30458555 | CNPJ: 82.179.524/0001-56 | I.E.: 252096550</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: "12px" }}>
+          <div style={{ fontWeight: 700, fontSize: "13px", color: "#172033" }}>Itens com divergencia para negociacao</div>
+          <div style={{ fontSize: "11px", color: "#64748b" }}>
+            {new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
+            {snapshot.latestRound ? ` — Rodada: ${snapshot.latestRound.mirrorFileName}` : ""}
+          </div>
+        </div>
+
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+          <thead>
+            <tr style={{ backgroundColor: "#f1f5f9" }}>
+              {["SKU Pepa", "SKU Forn.", "Descricao", "Qtd", "Unid.", "Fornecedor", "Preco Flex", "Preco Cotado", "Total"].map((h) => (
+                <th key={h} style={{ padding: "6px 8px", textAlign: "left", fontWeight: 700, color: "#475569", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #cbd5e1" }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {selectedRowsData.length === 0 ? (
+              <tr><td colSpan={9} style={{ padding: "12px 8px", color: "#94a3b8", textAlign: "center" }}>Nenhum item selecionado.</td></tr>
+            ) : selectedRowsData.map((row) => (
+              <tr key={`${row.sku}-${row.description}`} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.sku}</td>
+                <td style={{ padding: "6px 8px", color: "#64748b" }}>{row.supplierRef ?? "—"}</td>
+                <td style={{ padding: "6px 8px" }}>{row.description}</td>
+                <td style={{ padding: "6px 8px" }}>{formatQuantity(row.requestedQuantity)}</td>
+                <td style={{ padding: "6px 8px" }}>{row.unit}</td>
+                <td style={{ padding: "6px 8px" }}>{row.bestSupplier ?? "—"}</td>
+                <td style={{ padding: "6px 8px" }}>{row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}</td>
+                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.bestUnitPrice != null ? formatCurrency(row.bestUnitPrice) : "—"}</td>
+                <td style={{ padding: "6px 8px" }}>{row.bestTotal != null ? formatCurrency(row.bestTotal) : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

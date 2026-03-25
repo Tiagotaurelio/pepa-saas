@@ -38,3 +38,12 @@ button {
     animation: none !important;
   }
 }
+
+@media print {
+  @page { margin: 15mm; size: A4 landscape; }
+  body { background: white !important; }
+  aside { display: none !important; }
+  main > div:first-child { display: none !important; }
+  #pepa-screen-content { display: none !important; }
+  #pepa-print-view { display: block !important; }
+}
