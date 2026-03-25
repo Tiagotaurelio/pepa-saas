@@ -4,8 +4,8 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("admin@pepa.local");
-  const [password, setPassword] = useState("demo123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -72,18 +72,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-6 rounded-[24px] bg-brand-surface p-4 text-sm text-slate-600">
-          <p className="font-medium text-brand-ink">Credenciais demo</p>
-          <p className="mt-2">Email: admin@pepa.local</p>
-          <p>Senha: demo123</p>
-        </div>
-
-        <div className="mt-4 flex items-center justify-between text-sm">
-          <Link className="font-medium text-brand-blue transition hover:opacity-80" href="/demo">
-            Ver roteiro de demo
-          </Link>
-          <p className="text-slate-500">Healthcheck disponivel em /api/health</p>
-        </div>
       </div>
     </div>
   );

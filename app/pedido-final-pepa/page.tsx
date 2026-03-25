@@ -68,7 +68,7 @@ export default function PedidoFinalPepaPage() {
   return (
     <div>
       {/* Back button */}
-      <div className="mb-6">
+      <div className="mb-6 print:hidden">
         <Link
           href="/validacao-compra-pepa"
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-brand-ink"
@@ -93,7 +93,7 @@ export default function PedidoFinalPepaPage() {
 
       {/* Bloqueio: rodada ainda aberta */}
       {pepaSnapshot.latestRound && !isClosedRound && (
-        <div className="mb-6 rounded-[28px] border border-amber-200 bg-amber-50 p-5">
+        <div className="mb-6 rounded-[28px] border border-amber-200 bg-amber-50 p-5 print:hidden">
           <p className="font-semibold text-amber-800">Exportacao bloqueada — rodada ainda aberta</p>
           <p className="mt-1 text-sm text-amber-700">
             Para exportar o pedido final, feche a rodada de cotacoes. Isso congela os dados para auditoria.
@@ -157,7 +157,7 @@ export default function PedidoFinalPepaPage() {
             <p className="text-sm text-slate-500">Linhas exportaveis</p>
             <h3 className="mt-1 text-xl font-semibold">Grade final para exportacao</h3>
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-3 print:hidden">
             <button
               className="rounded-full bg-brand-blue px-5 py-2.5 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
               disabled={exportState?.status === "loading" || !canExport}
@@ -171,6 +171,12 @@ export default function PedidoFinalPepaPage() {
               onClick={() => void handleExport("csv")}
             >
               {exportState?.status === "loading" && exportState.format === "csv" ? "Gerando..." : "Exportar CSV"}
+            </button>
+            <button
+              className="rounded-full bg-slate-700 px-5 py-2.5 text-sm font-medium text-white"
+              onClick={() => window.print()}
+            >
+              Imprimir / PDF
             </button>
           </div>
         </div>
