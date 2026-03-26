@@ -337,7 +337,16 @@ export default function CotacoesPepaPage() {
                       </td>
                       <td className="px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
                       <td className="px-4 py-4 text-xs text-slate-500">{row.supplierRef ?? "—"}</td>
-                      <td className="px-4 py-4">{row.description}</td>
+                      <td className={`px-4 py-4 ${row.descriptionMismatch ? "bg-yellow-50" : ""}`}>
+                        <div className="flex flex-col gap-0.5">
+                          <span>{row.description}</span>
+                          {row.descriptionMismatch && row.supplierDescription && (
+                            <span className="inline-flex items-center gap-1 text-xs text-amber-700">
+                              <span className="font-semibold">Forn.:</span> {row.supplierDescription}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-4">
                         {qtyDivergence && snapshot.latestRound && !isClosedRound && editingQtyKey === rowKey ? (
                           <div className="flex items-center gap-1">
@@ -625,19 +634,33 @@ export default function CotacoesPepaPage() {
           <tbody>
             {selectedRowsData.length === 0 ? (
               <tr><td colSpan={9} style={{ padding: "12px 8px", color: "#94a3b8", textAlign: "center" }}>Nenhum item selecionado.</td></tr>
-            ) : selectedRowsData.map((row) => (
+            ) : selectedRowsData.map((row) => {
+              const printQtyDivergence = hasQuantityDivergence(row);
+              const printQtyQuoted = row.offers?.[0]?.quotedQuantity;
+              return (
               <tr key={`${row.sku}-${row.description}`} style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.sku}</td>
                 <td style={{ padding: "6px 8px", color: "#64748b" }}>{row.supplierRef ?? "—"}</td>
-                <td style={{ padding: "6px 8px" }}>{row.description}</td>
-                <td style={{ padding: "6px 8px" }}>{formatQuantity(row.requestedQuantity)}</td>
+                <td style={{ padding: "6px 8px", backgroundColor: row.descriptionMismatch ? "#fefce8" : "transparent" }}>
+                  <div>{row.description}</div>
+                  {row.descriptionMismatch && row.supplierDescription && (
+                    <div style={{ fontSize: "9px", color: "#b45309", marginTop: "2px" }}>Forn.: {row.supplierDescription}</div>
+                  )}
+                </td>
+                <td style={{ padding: "6px 8px", backgroundColor: printQtyDivergence ? "#fff7ed" : "transparent" }}>
+                  <div>{formatQuantity(row.requestedQuantity)}</div>
+                  {printQtyDivergence && printQtyQuoted != null && (
+                    <div style={{ fontSize: "9px", color: "#c2410c", marginTop: "2px" }}>Cotado: {formatQuantity(printQtyQuoted)}</div>
+                  )}
+                </td>
                 <td style={{ padding: "6px 8px" }}>{row.unit}</td>
                 <td style={{ padding: "6px 8px" }}>{row.bestSupplier ?? "—"}</td>
                 <td style={{ padding: "6px 8px" }}>{row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}</td>
                 <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.bestUnitPrice != null ? formatCurrency(row.bestUnitPrice) : "—"}</td>
                 <td style={{ padding: "6px 8px" }}>{row.bestTotal != null ? formatCurrency(row.bestTotal) : "—"}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -656,10 +679,10 @@ function hasQuantityDivergence(row: { requestedQuantity: number; offers?: { quot
   return Math.abs(offer.quotedQuantity - row.requestedQuantity) > 0.001;
 }
 
-function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[]; selectionMode?: string }) {
+function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[]; selectionMode?: string; descriptionMismatch?: boolean }) {
   // User made a conscious decision (accepted or adjusted) — all divergences resolved
   if (row.selectionMode === "manual") return false;
-  return hasPriceDivergence(row) || hasQuantityDivergence(row);
+  return hasPriceDivergence(row) || hasQuantityDivergence(row) || (row.descriptionMismatch === true);
 }
 
 function formatCurrency(value: number) {

@@ -51,6 +51,8 @@ export type ComparisonRow = {
   selectionMode?: "automatic" | "manual";
   baseUnitPrice?: number | null;
   supplierRef?: string;
+  supplierDescription?: string | null;
+  descriptionMismatch?: boolean;
 };
 
 export type ComparisonOffer = {
@@ -58,6 +60,7 @@ export type ComparisonOffer = {
   unitPrice: number;
   totalValue: number | null;
   quotedQuantity?: number | null;
+  supplierDescription?: string | null;
 };
 
 export type PepaSnapshot = {

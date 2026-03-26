@@ -426,6 +426,10 @@ function buildSuppliers(
   });
 }
 
+function normalizeDescription(value: string): string {
+  return value.toUpperCase().replace(/\s+/g, " ").trim();
+}
+
 function buildComparisonRows(
   requestedItems: RequestedItem[],
   supplierFiles: ParsedSupplierFile[]
@@ -447,8 +451,14 @@ function buildComparisonRows(
       supplierName,
       unitPrice: quote.unitPrice,
       totalValue: quote.totalValue,
-      quotedQuantity: quote.quotedQuantity ?? null
+      quotedQuantity: quote.quotedQuantity ?? null,
+      supplierDescription: quote.description || null
     }));
+
+    const supplierDescription = bestQuote?.quote.description ?? null;
+    const descriptionMismatch = supplierDescription
+      ? normalizeDescription(supplierDescription) !== normalizeDescription(item.description)
+      : false;
 
     return {
       sourceOrder: index + 1,
@@ -464,7 +474,9 @@ function buildComparisonRows(
       offers,
       selectionMode: "automatic",
       baseUnitPrice: item.baseUnitPrice ?? null,
-      supplierRef: item.supplierRef
+      supplierRef: item.supplierRef,
+      supplierDescription,
+      descriptionMismatch
     };
   });
 }
