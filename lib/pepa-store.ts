@@ -1064,10 +1064,10 @@ function parseFlexOrderPdfLines(lines: string[]): RequestedItem[] {
         const qty = parseInt(lines[i + 5] ?? "", 10);
         const vlUnitStr = (lines[i + 7] ?? "").trim();
         if (
-          !isNaN(seq) && seq > 0 && seq <= 99 &&
-          /^\d{5,6}$/.test(pepaCode) &&
+          !isNaN(seq) && seq > 0 &&
+          /^\d+$/.test(pepaCode) && pepaCode.length >= 1 &&
           description.length > 0 &&
-          /^\d{4,6}$/.test(supplierRef) &&
+          supplierRef.length > 0 &&
           !isNaN(qty) && qty > 0
         ) {
           const baseUnitPrice = parseDecimal(vlUnitStr);
