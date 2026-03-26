@@ -328,6 +328,10 @@ export default function CotacoesPepaPage() {
                   const anyDivergence = hasAnyRawDivergence && row.selectionMode !== "manual";
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const rowStyle = { backgroundColor: anyDivergence ? "#fef2f2" : "#f5f7fa" };
+                  // Quando há fornecedor único e o item não foi extraído pelo parser,
+                  // usa o preço do Flex como preço cotado (fornecedor confirmado pelo usuário)
+                  const effectiveUnitPrice = row.bestUnitPrice ?? (singleSupplier ? row.baseUnitPrice : null);
+                  const effectiveTotal = row.bestTotal ?? (singleSupplier && row.baseUnitPrice != null ? roundDisplay(row.baseUnitPrice * row.requestedQuantity) : null);
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
                   const isExpanded = expandedOffersKey === rowKey;
 
@@ -431,7 +435,7 @@ export default function CotacoesPepaPage() {
                         {row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}
                       </td>
                       <td className={`px-4 py-4 font-medium ${priceDivergence ? "text-red-700" : "text-slate-700"}`}>
-                        {row.bestUnitPrice === null ? "Pendente" : formatCurrency(row.bestUnitPrice)}
+                        {effectiveUnitPrice != null ? formatCurrency(effectiveUnitPrice) : "—"}
                       </td>
                       <td className="px-4 py-4">
                         {priceDivergence && row.baseUnitPrice != null && row.bestUnitPrice != null
@@ -439,7 +443,7 @@ export default function CotacoesPepaPage() {
                           : <span className="text-slate-300">—</span>}
                       </td>
                       <td className="px-4 py-4">
-                        {row.bestTotal === null ? "Pendente" : formatCurrency(row.bestTotal)}
+                        {effectiveTotal != null ? formatCurrency(effectiveTotal) : "—"}
                       </td>
                       <td className="rounded-r-[24px] px-4 py-4">
                         <div className="flex flex-col gap-2">
@@ -730,6 +734,10 @@ function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: numb
   // User made a conscious decision (accepted or adjusted) — all divergences resolved
   if (row.selectionMode === "manual") return false;
   return hasPriceDivergence(row) || hasQuantityDivergence(row) || (row.descriptionMismatch === true);
+}
+
+function roundDisplay(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function formatCurrency(value: number) {
