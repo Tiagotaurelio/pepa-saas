@@ -1043,7 +1043,7 @@ function parseSupplierQuotePdfLines(lines: string[]): SupplierQuoteRow[] {
     // Suporta formato espaçado ("9 14393 DESCRICAO") e colado ("914393DESCRICAO")
     const seqCodMatch =
       beforeNcm.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
-      beforeNcm.match(/^(\d{1,2}?)(\d{4,6})([A-Za-zÀ-ÿ].*)/);
+      beforeNcm.match(/^(\d{1,2})(\d{4,6})([A-Za-zÀ-ÿ].*)/);
     if (seqCodMatch) {
       cod = seqCodMatch[2];
       description = seqCodMatch[3].trim();
@@ -1054,7 +1054,7 @@ function parseSupplierQuotePdfLines(lines: string[]): SupplierQuoteRow[] {
         if (!prev || prev.startsWith("$") || /^\d+\$/.test(prev)) break;
         const itemStart =
           prev.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
-          prev.match(/^(\d{1,2}?)(\d{4,6})([A-Za-zÀ-ÿ].*)/);
+          prev.match(/^(\d{1,2})(\d{4,6})([A-Za-zÀ-ÿ].*)/);
         if (itemStart) {
           cod = itemStart[2];
           const descParts: string[] = [];
