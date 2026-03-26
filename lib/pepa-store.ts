@@ -510,11 +510,23 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
     return [];
   }
 
-  // Parser dedicado para PDF gerado pelo Flex (COMPRA DE MERCADORIA)
+  // Parser dedicado para PDF gerado pelo Flex (COMPRA DE MERCADORIA / RETORNO ORCAMENTO)
   if (file.name.toLowerCase().endsWith(".pdf")) {
     const lines = await extractTextLines(file);
+
+    // Log para diagnóstico quando o arquivo-base não é reconhecido
+    if (lines.length > 0) {
+      console.log("[PEPA mirror debug] Primeiras 60 linhas de:", file.name);
+      lines.slice(0, 60).forEach((l, i) => console.log(`  [${i}] ${l}`));
+    }
+
     const flexItems = parseFlexOrderPdfLines(lines);
     if (flexItems.length > 0) return flexItems;
+
+    // Tenta formato CORFIO RETORNO ORCAMENTO (linhas com seq+cod+desc+un+qtd na mesma linha)
+    const corFioItems = parseCorFioRetornoOrcamentoPdfLines(lines);
+    if (corFioItems.length > 0) return corFioItems;
+
     return inferRequestedItemsFromLines(lines);
   }
 
@@ -969,6 +981,68 @@ async function extractTextLines(file: UploadFileInput): Promise<string[]> {
   }
 
   return [];
+}
+
+// ─── Parser para CORFIO RETORNO ORCAMENTO / outros formatos Flex tabulares ────
+// Detecta linhas no formato: {seq} {cod5-6} {descrição} {un} {qtde} [{preco}]
+// ou blocos onde seq+cod estão numa linha e os demais campos nas próximas.
+function parseCorFioRetornoOrcamentoPdfLines(lines: string[]): RequestedItem[] {
+  const items: RequestedItem[] = [];
+  const seen = new Set<string>();
+
+  // Padrão: linha começa com seq (1-3 dígitos), depois cod PEPA (5-6 dígitos)
+  // Ex: "1 16682 CANTONEIRA PRAT... UN 24" ou "001 16682 CANTONEIRA..."
+  const fullLinePattern = /^(\d{1,3})\s+(\d{5,6})\s+(.+?)\s+(UN|UND|UNID|PCT|PC|PCA|RL|ROLO|CX|CJ|KIT|M|MT|L|LT|KG|JG)\s+(\d+(?:[.,]\d+)?)\s*/i;
+  // Padrão alternativo: sem unidade explícita — quantidade no final
+  const noUnitPattern = /^(\d{1,3})\s+(\d{5,6})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s*$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = (lines[i] ?? "").trim();
+
+    let m = line.match(fullLinePattern);
+    if (m) {
+      const sku = m[2];
+      const description = m[3].trim();
+      const unit = m[4].toUpperCase();
+      const qty = parseDecimal(m[5]);
+      const key = `${sku}-${description}`;
+      if (!seen.has(key) && Number.isFinite(qty) && qty > 0 && description.length > 2) {
+        seen.add(key);
+        // Tenta extrair preço unitário da mesma linha ou próxima linha
+        const priceMatch = line.slice(line.indexOf(m[5]) + m[5].length).match(/([\d,.]+)/);
+        const baseUnitPrice = priceMatch ? parseDecimal(priceMatch[1]) : NaN;
+        items.push({
+          sku,
+          description,
+          unit,
+          requestedQuantity: qty,
+          source: "real-supplier-quote",
+          ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
+        });
+      }
+      continue;
+    }
+
+    m = line.match(noUnitPattern);
+    if (m) {
+      const sku = m[2];
+      const description = m[3].trim();
+      const qty = parseDecimal(m[4]);
+      const key = `${sku}-${description}`;
+      if (!seen.has(key) && Number.isFinite(qty) && qty > 0 && description.length > 2 && !looksLikeHeader(description)) {
+        seen.add(key);
+        items.push({
+          sku,
+          description,
+          unit: "UN",
+          requestedQuantity: qty,
+          source: "real-supplier-quote"
+        });
+      }
+    }
+  }
+
+  return items;
 }
 
 // ─── Parser específico para PDF do Flex (COMPRA DE MERCADORIA) ────────────────
