@@ -983,92 +983,186 @@ async function extractTextLines(file: UploadFileInput): Promise<string[]> {
   return [];
 }
 
-// ─── Parser para CORFIO RETORNO ORCAMENTO / outros formatos Flex tabulares ────
-// Detecta linhas no formato: {seq} {cod5-6} {descrição} {un} {qtde} [{preco}]
-// ou blocos onde seq+cod estão numa linha e os demais campos nas próximas.
+// ─── Parser para "Pedido de Vendas Cliente" (ex: ELETROCAL / CORFIO) ─────────
+// pdf-parse extrai cada linha horizontal como uma única string.
+// Formato por linha:
+//   {qt.ped} {un} {código} {descrição} [{Sim}] [{Nao}] {lances} {vlr.unit} {vlr.prod} {%ipi}
+// Ex: "8,00 RL 0007N-BC Cordão paralelo 300V 2x1,5mm2 - Branco 1 239,5536 1.916,43 0,00"
+// Bobina: "1.500,00 M B1025E-AZ Cabo flexivel 1KV 1x10,0mm2 HEPR - Azul Sim Nao 1 7,9690 11.953,45 0,00"
 function parseCorFioRetornoOrcamentoPdfLines(lines: string[]): RequestedItem[] {
   const items: RequestedItem[] = [];
   const seen = new Set<string>();
+  const UNIT_RE = /^(MT|RL|UN|UND|UNID|PC|PCA|M|L|KG|CX|KIT|CJ|GR|JG|TON|R|U)$/i;
 
-  // Padrão: linha começa com seq (1-3 dígitos), depois cod PEPA (5-6 dígitos)
-  // Ex: "1 16682 CANTONEIRA PRAT... UN 24" ou "001 16682 CANTONEIRA..."
-  const fullLinePattern = /^(\d{1,3})\s+(\d{5,6})\s+(.+?)\s+(UN|UND|UNID|PCT|PC|PCA|RL|ROLO|CX|CJ|KIT|M|MT|L|LT|KG|JG)\s+(\d+(?:[.,]\d+)?)\s*/i;
-  // Padrão alternativo: sem unidade explícita — quantidade no final
-  const noUnitPattern = /^(\d{1,3})\s+(\d{5,6})\s+(.+?)\s+(\d+(?:[.,]\d+)?)\s*$/;
+  // Detecta se o PDF é de "Pedido de Vendas" pelo cabeçalho
+  const isPedidoVendas = lines.some(l => /pedido\s+de\s+vendas/i.test(l));
+  if (!isPedidoVendas) return [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = (lines[i] ?? "").trim();
+  for (const line of lines) {
+    const trimmed = line.trim();
 
-    let m = line.match(fullLinePattern);
-    if (m) {
-      const sku = m[2];
-      const description = m[3].trim();
-      const unit = m[4].toUpperCase();
-      const qty = parseDecimal(m[5]);
-      const key = `${sku}-${description}`;
-      if (!seen.has(key) && Number.isFinite(qty) && qty > 0 && description.length > 2) {
-        seen.add(key);
-        // Tenta extrair preço unitário da mesma linha ou próxima linha
-        const priceMatch = line.slice(line.indexOf(m[5]) + m[5].length).match(/([\d,.]+)/);
-        const baseUnitPrice = priceMatch ? parseDecimal(priceMatch[1]) : NaN;
-        items.push({
-          sku,
-          description,
-          unit,
-          requestedQuantity: qty,
-          source: "real-supplier-quote",
-          ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
-        });
-      }
-      continue;
+    // Linha de dado: começa com quantidade decimal (pode ter . e ,) + unidade + código alfanumérico
+    const startMatch = trimmed.match(/^([\d.,]+)\s+(\S+)\s+([A-Z0-9][A-Z0-9._-]*)\s+/i);
+    if (!startMatch) continue;
+
+    const qty = parseDecimal(startMatch[1]);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const unitCandidate = startMatch[2];
+    if (!UNIT_RE.test(unitCandidate)) continue;
+    const unit = unitCandidate.toUpperCase();
+
+    const sku = startMatch[3];
+    // Rejeita se código parecer um número puro muito grande (provavelmente não é um código)
+    if (/^\d{8,}$/.test(sku)) continue;
+
+    const afterStart = trimmed.slice(startMatch[0].length).trim();
+    const tokens = afterStart.split(/\s+/);
+
+    // Remove os 3 últimos números: %ipi, vlr.prod, vlr.unit
+    let trailingNums = 0;
+    let vlrUnit = NaN;
+    const stripped = [...tokens];
+    while (stripped.length > 0 && /^[\d.,]+$/.test(stripped[stripped.length - 1] ?? "")) {
+      const val = parseDecimal(stripped.pop() ?? "");
+      trailingNums++;
+      if (trailingNums === 3) vlrUnit = val; // terceiro a partir do fim = vlr.unit
+    }
+    if (trailingNums < 3) continue;
+
+    // Remove lances (inteiro pequeno) e tokens opcionais como "Sim"/"Nao"
+    while (
+      stripped.length > 0 &&
+      /^(\d{1,2}|sim|nao|não|s|n)$/i.test(stripped[stripped.length - 1] ?? "")
+    ) {
+      stripped.pop();
     }
 
-    m = line.match(noUnitPattern);
-    if (m) {
-      const sku = m[2];
-      const description = m[3].trim();
-      const qty = parseDecimal(m[4]);
-      const key = `${sku}-${description}`;
-      if (!seen.has(key) && Number.isFinite(qty) && qty > 0 && description.length > 2 && !looksLikeHeader(description)) {
-        seen.add(key);
-        items.push({
-          sku,
-          description,
-          unit: "UN",
-          requestedQuantity: qty,
-          source: "real-supplier-quote"
-        });
-      }
+    const description = stripped.join(" ").trim();
+    if (!description || description.length < 3) continue;
+
+    const key = `${sku}-${description}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({
+        sku,
+        description,
+        unit,
+        requestedQuantity: qty,
+        source: "real-supplier-quote",
+        ...(Number.isFinite(vlrUnit) && vlrUnit > 0 ? { baseUnitPrice: vlrUnit } : {})
+      });
     }
   }
 
   return items;
 }
 
-// ─── Parser específico para PDF do Flex (COMPRA DE MERCADORIA) ────────────────
-// Estrutura: 10 linhas por item após cada cabeçalho "Seq":
-//   [0] seq  [1] código PEPA  [2] descrição  [3] un  [4] ref.fornecedor
-//   [5] qtde  [6] prev.fat.   [7] vl.unit    [8] vl.total  [9] %ipi
+// ─── Parser para PDF do Flex (COMPRA DE MERCADORIA) — modo linha inteira ────
+// pdf-parse extrai cada linha horizontal como uma única string.
+// Formato por linha:
+//   {seq} {código} {descrição} {ref.forn} {un} {qtde} {dd/mm/yyyy} {vl.unit} {vl.total} {%ipi}
+// Ex: "1 5559 BOBINA CABO FLEXIVEL HEPR 1KV 10MM AZUL CORFIO WB1025E-AZ MT 1.500 05/03/2026 7,18 10770,00 0,00"
 function parseFlexOrderPdfLines(lines: string[]): RequestedItem[] {
+  const items: RequestedItem[] = [];
+  const seen = new Set<string>();
+  const UNIT_RE = /^(MT|RL|UN|UND|UNID|PC|PCA|M|L|KG|CX|KIT|CJ|GR|JG|TON|R|U)$/i;
+  const DATE_RE = /\b(\d{2}\/\d{2}\/\d{4})\b/;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Linha de dado começa com: seq (1-3 dígitos) + espaço + código PEPA (1-6 dígitos)
+    const seqCodeMatch = trimmed.match(/^(\d{1,3})\s+(\d{1,6})\s+/);
+    if (!seqCodeMatch) continue;
+
+    const seq = parseInt(seqCodeMatch[1], 10);
+    if (seq <= 0) continue;
+    const sku = seqCodeMatch[2];
+
+    const rest = trimmed.slice(seqCodeMatch[0].length);
+
+    // A data (Prev.Fat.) é âncora confiável: separa descrição+ref+un+qtde dos preços
+    const dateMatch = rest.match(DATE_RE);
+    if (!dateMatch) continue;
+
+    const dateIdx = rest.indexOf(dateMatch[1]);
+    const beforeDate = rest.slice(0, dateIdx).trim();
+    const afterDate = rest.slice(dateIdx + dateMatch[1].length).trim();
+
+    // Extrai vl.unit: primeiro número após a data
+    const priceMatch = afterDate.match(/^([\d.,]+)/);
+    const baseUnitPrice = priceMatch ? parseDecimal(priceMatch[1]) : NaN;
+
+    // Analisa a parte antes da data de trás para frente: qty, unit, ref_forn, description
+    const tokens = beforeDate.split(/\s+/);
+    if (tokens.length < 3) continue;
+
+    const qtyStr = tokens[tokens.length - 1] ?? "";
+    const qty = parseDecimal(qtyStr);
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const unitCandidate = tokens[tokens.length - 2] ?? "";
+    const isUnit = UNIT_RE.test(unitCandidate);
+    const unit = isUnit ? unitCandidate.toUpperCase() : "UN";
+    const endIdx = isUnit ? tokens.length - 2 : tokens.length - 1;
+
+    // Token imediatamente antes da unidade = ref. fornecedor (alfanumérico, não só dígitos)
+    const refCandidate = tokens[endIdx - 1] ?? "";
+    const isRef = refCandidate.length >= 2 && /^[A-Z0-9][A-Z0-9._-]*$/i.test(refCandidate) && !/^\d+$/.test(refCandidate);
+    const supplierRef = isRef ? refCandidate : undefined;
+    const descEnd = isRef ? endIdx - 1 : endIdx;
+
+    const description = tokens.slice(0, descEnd).join(" ").trim();
+    if (!description || description.length < 3) continue;
+
+    const key = `${sku}-${description}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({
+        sku,
+        description,
+        unit,
+        requestedQuantity: qty,
+        source: "real-supplier-quote",
+        ...(supplierRef ? { supplierRef } : {}),
+        ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
+      });
+    }
+  }
+
+  // Fallback: modo célula (um valor por linha) — para PDFs que extraem coluna a coluna
+  if (items.length === 0) {
+    return parseFlexOrderCellMode(lines);
+  }
+  return items;
+}
+
+// Fallback cell-mode para PDFs que extraem uma célula por linha
+function parseFlexOrderCellMode(lines: string[]): RequestedItem[] {
   const items: RequestedItem[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (lines[i] === "Seq") {
-      i += 10; // pula as 10 linhas do cabeçalho
+    // Procura "Seq" como linha isolada (cabeçalho da tabela)
+    if (/^Seq$/i.test(lines[i] ?? "")) {
+      // Avança até a primeira linha de dados (pula cabeçalho de colunas)
+      i++;
+      while (i < lines.length && !/^\d+$/.test(lines[i] ?? "")) i++;
+      // Lê blocos de 10 linhas por item
       while (i + 9 < lines.length) {
         const seq = parseInt(lines[i] ?? "", 10);
         const pepaCode = (lines[i + 1] ?? "").trim();
         const description = (lines[i + 2] ?? "").trim();
-        const unit = (lines[i + 3] ?? "").trim();
-        const supplierRef = (lines[i + 4] ?? "").trim();
-        const qty = parseInt(lines[i + 5] ?? "", 10);
+        // Colunas: [3]=Ref.Forn [4]=Un [5]=Qtde [6]=Prev.Fat [7]=Vl.Unit [8]=Vl.Total [9]=%Ipi
+        const supplierRef = (lines[i + 3] ?? "").trim();
+        const unit = (lines[i + 4] ?? "").trim();
+        const qty = parseDecimal(lines[i + 5] ?? "");
         const vlUnitStr = (lines[i + 7] ?? "").trim();
         if (
           !isNaN(seq) && seq > 0 &&
           /^\d+$/.test(pepaCode) && pepaCode.length >= 1 &&
           description.length > 0 &&
-          supplierRef.length > 0 &&
-          !isNaN(qty) && qty > 0
+          Number.isFinite(qty) && qty > 0
         ) {
           const baseUnitPrice = parseDecimal(vlUnitStr);
           items.push({
@@ -1077,7 +1171,7 @@ function parseFlexOrderPdfLines(lines: string[]): RequestedItem[] {
             unit: unit || "UN",
             requestedQuantity: qty,
             source: "real-supplier-quote",
-            supplierRef,
+            ...(supplierRef.length > 0 ? { supplierRef } : {}),
             ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
           });
           i += 10;
