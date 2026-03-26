@@ -695,7 +695,7 @@ function hasQuantityDivergence(row: { requestedQuantity: number; bestSupplier?: 
   return Math.abs(offer.quotedQuantity - row.requestedQuantity) > 0.001;
 }
 
-function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; offers?: { quotedQuantity?: number | null }[]; selectionMode?: string; descriptionMismatch?: boolean }) {
+function hasDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?: number | null; requestedQuantity: number; bestSupplier?: string | null; offers?: { supplierName: string; quotedQuantity?: number | null }[]; selectionMode?: string; descriptionMismatch?: boolean }) {
   // User made a conscious decision (accepted or adjusted) — all divergences resolved
   if (row.selectionMode === "manual") return false;
   return hasPriceDivergence(row) || hasQuantityDivergence(row) || (row.descriptionMismatch === true);
