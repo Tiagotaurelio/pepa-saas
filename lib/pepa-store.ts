@@ -1372,7 +1372,10 @@ function inferRequestedItemFromLine(line: string): RequestedItem | null {
     return null;
   }
 
-  const quantityMatch = compact.match(/(\d+(?:[.,]\d+)?)$/);
+  // Remove zeros finais do tipo %IPI (0,00 ou 0.00) que muitos PDFs trazem como última coluna
+  let searchIn = compact.replace(/(?:\s+0[,.]0+)+\s*$/, "").trim();
+
+  const quantityMatch = searchIn.match(/(\d+(?:[.,]\d+)?)$/);
   if (!quantityMatch?.index) {
     return null;
   }
@@ -1382,7 +1385,7 @@ function inferRequestedItemFromLine(line: string): RequestedItem | null {
     return null;
   }
 
-  const prefix = compact.slice(0, quantityMatch.index).trim();
+  const prefix = searchIn.slice(0, quantityMatch.index).trim();
   const skuMatch = prefix.match(/^([A-Za-z0-9./_-]{3,})\s+(.+)$/);
   if (!skuMatch) {
     return null;
