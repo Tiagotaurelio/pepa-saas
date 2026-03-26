@@ -461,10 +461,12 @@ export default function CotacoesPepaPage() {
                                 type="button"
                                 onClick={() => {
                                   if (!priceDivergence && !qtyDivergence) {
-                                    // Unica divergencia era descrição — salva e resolve o item
+                                    // Única divergência era descrição — salva e resolve o item
+                                    // Para itens sem match no parser (bestSupplier=null), o store aceita null
+                                    // e define selectionMode=manual via caminho específico
                                     void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined);
                                   } else {
-                                    // Ainda ha outras divergencias — aceita descrição localmente e mantém o item na tela
+                                    // Ainda há outras divergências — aceita descrição localmente e mantém o item na tela
                                     setLocallyAcceptedDesc((prev) => { const next = new Set(prev); next.add(rowKey); return next; });
                                   }
                                 }}
@@ -475,7 +477,7 @@ export default function CotacoesPepaPage() {
                               </button>
                             </div>
                           )}
-                          {priceDivergence && snapshot.latestRound && !isClosedRound && (
+                          {priceDivergence && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
                             <div className="mt-1 flex flex-col gap-1">
                               {editingRowKey === rowKey ? (
                                 <div className="flex items-center gap-1">
