@@ -20,7 +20,7 @@ export default function CotacoesPepaPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTogglingRound, setIsTogglingRound] = useState(false);
   const [roundStatusMessage, setRoundStatusMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
-  const [showOnlyDivergences, setShowOnlyDivergences] = useState(false);
+  const [showOnlyDivergences, setShowOnlyDivergences] = useState(searchParams.get("showDivergences") === "true");
   const [savingRowKey, setSavingRowKey] = useState<string | null>(null);
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
   const [adjustedPrice, setAdjustedPrice] = useState("");
@@ -248,14 +248,14 @@ export default function CotacoesPepaPage() {
       {isClosedRound ? (
         <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
           <p className="text-sm text-slate-500">Rodada anterior encerrada</p>
-          <p className="mt-1 text-slate-600">Importe novos arquivos acima para iniciar uma nova rodada de cotacao.</p>
+          <p className="mt-1 text-slate-600">Importe novos arquivos acima para iniciar uma nova rodada de cotação.</p>
         </section>
       ) : null}
       {!isClosedRound && <section className="mt-6 rounded-[32px] bg-white p-6 shadow-panel">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm text-slate-500">Mapa comparativo</p>
-            <h3 className="mt-1 text-xl font-semibold">Itens consolidados para decisao de compra</h3>
+            <h3 className="mt-1 text-xl font-semibold">Itens consolidados para decisão de compra</h3>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {snapshot.comparisonRows.some(hasDivergence) && (
@@ -267,8 +267,8 @@ export default function CotacoesPepaPage() {
                 }`}
               >
                 {showOnlyDivergences
-                  ? `Mostrando ${snapshot.comparisonRows.filter(hasDivergence).length} divergencia(s)`
-                  : `Ver so divergencias (${snapshot.comparisonRows.filter(hasDivergence).length})`}
+                  ? `Mostrando ${snapshot.comparisonRows.filter(hasDivergence).length} divergência(s)`
+                  : `Ver só divergências (${snapshot.comparisonRows.filter(hasDivergence).length})`}
               </button>
             )}
           </div>
@@ -295,8 +295,8 @@ export default function CotacoesPepaPage() {
                 <th className="px-4">Qtd pedida</th>
                 <th className="px-4">Unid.</th>
                 <th className="px-4">Fornecedor</th>
-                <th className="px-4">Preco Flex</th>
-                <th className="px-4">Preco Cotado</th>
+                <th className="px-4">Preço Flex</th>
+                <th className="px-4">Preço Cotado</th>
                 <th className="px-4">Dif.</th>
                 <th className="px-4">Total</th>
                 <th className="px-4">Status</th>
@@ -581,13 +581,13 @@ export default function CotacoesPepaPage() {
 
         {selectedRows.size > 0 && (
           <div className="mt-4 flex items-center justify-between rounded-[20px] bg-blue-50 px-5 py-3">
-            <span className="text-sm font-medium text-blue-700">{selectedRows.size} iten(s) selecionado(s) para negociacao</span>
+            <span className="text-sm font-medium text-blue-700">{selectedRows.size} item(ns) selecionado(s) para negociação</span>
             <button
               type="button"
               onClick={() => window.print()}
               className="rounded-full bg-brand-blue px-5 py-2 text-sm font-medium text-white hover:opacity-90"
             >
-              Exportar PDF para negociacao
+              Exportar PDF para negociação
             </button>
           </div>
         )}
@@ -612,7 +612,7 @@ export default function CotacoesPepaPage() {
             <div className="mt-6 flex items-center justify-end gap-3">
               {!allResolved && (
                 <span className="text-sm text-slate-500">
-                  {pendingCount} divergencia(s) pendente(s) — revise os itens acima
+                  {pendingCount} divergência(s) pendente(s) — revise os itens acima
                 </span>
               )}
               {allResolved ? (
@@ -620,14 +620,14 @@ export default function CotacoesPepaPage() {
                   href="/validacao-compra-pepa"
                   className="rounded-full bg-brand-blue px-6 py-3 text-sm font-medium text-white shadow-panel hover:opacity-90"
                 >
-                  Ir para Validacao →
+                  Ir para Validação →
                 </a>
               ) : (
                 <button
                   disabled
                   className="rounded-full bg-slate-200 px-6 py-3 text-sm font-medium text-slate-400 cursor-not-allowed"
                 >
-                  Ir para Validacao →
+                  Ir para Validação →
                 </button>
               )}
             </div>
