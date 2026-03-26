@@ -125,7 +125,8 @@ export default function ValidacaoCompraPepaPage() {
             <table className="min-w-full border-separate border-spacing-y-3">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.2em] text-brand-muted">
-                  <th className="px-4">SKU</th>
+                  <th className="px-4">SKU Pepa</th>
+                  <th className="px-4">SKU Forn.</th>
                   <th className="px-4">Item</th>
                   <th className="px-4">Qtd</th>
                   <th className="px-4">Fornecedor</th>
@@ -151,6 +152,7 @@ export default function ValidacaoCompraPepaPage() {
                       style={{ backgroundColor: divergent ? "#fef2f2" : "#f5f7fa" }}
                     >
                       <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                      <td className="px-4 py-4 text-slate-500">{row.supplierRef ?? "—"}</td>
                       <td className="px-4 py-4">{row.description}</td>
                       <td className="px-4 py-4">{formatQuantity(row.requestedQuantity)}</td>
                       <td className="px-4 py-4">{row.bestSupplier ?? singleSupplier ?? "—"}</td>

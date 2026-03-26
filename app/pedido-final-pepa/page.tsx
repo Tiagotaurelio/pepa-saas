@@ -73,12 +73,12 @@ export default function PedidoFinalPepaPage() {
           href="/validacao-compra-pepa"
           className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-brand-ink"
         >
-          ← Voltar para Validacao
+          ← Voltar para Validação
         </Link>
       </div>
 
       <div className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">Pedido Final</div>
-      <h1 className="mb-6 text-2xl font-semibold text-brand-ink">Exportacao do pedido de compra</h1>
+      <h1 className="mb-6 text-2xl font-semibold text-brand-ink">Exportação do pedido de compra</h1>
 
       {isLoading && (
         <div className="mb-6">
@@ -96,7 +96,7 @@ export default function PedidoFinalPepaPage() {
         <div className="mb-6 rounded-[28px] border border-amber-200 bg-amber-50 p-5 print:hidden">
           <p className="font-semibold text-amber-800">Exportacao bloqueada — rodada ainda aberta</p>
           <p className="mt-1 text-sm text-amber-700">
-            Para exportar o pedido final, feche a rodada de cotacoes. Isso congela os dados para auditoria.
+            Para exportar o pedido final, feche a rodada de cotações. Isso congela os dados para auditoria.
           </p>
           <button
             onClick={() => void handleCloseRound()}
@@ -154,8 +154,8 @@ export default function PedidoFinalPepaPage() {
       <section className="rounded-[32px] bg-white p-6 shadow-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <p className="text-sm text-slate-500">Linhas exportaveis</p>
-            <h3 className="mt-1 text-xl font-semibold">Grade final para exportacao</h3>
+            <p className="text-sm text-slate-500">Linhas exportáveis</p>
+            <h3 className="mt-1 text-xl font-semibold">Grade final para exportação</h3>
           </div>
           <div className="flex gap-3 print:hidden">
             <button
@@ -185,11 +185,12 @@ export default function PedidoFinalPepaPage() {
           <table className="min-w-full border-separate border-spacing-y-3">
             <thead>
               <tr className="text-left text-xs uppercase tracking-[0.2em] text-brand-muted">
-                <th className="px-4">SKU</th>
-                <th className="px-4">Descricao</th>
+                <th className="px-4">SKU Pepa</th>
+                <th className="px-4">SKU Forn.</th>
+                <th className="px-4">Descrição</th>
                 <th className="px-4">Qtd</th>
                 <th className="px-4">Fornecedor</th>
-                <th className="px-4">Preco unit.</th>
+                <th className="px-4">Preço unit.</th>
                 <th className="px-4">Total</th>
                 <th className="px-4">Status</th>
               </tr>
@@ -197,14 +198,17 @@ export default function PedidoFinalPepaPage() {
             <tbody>
               {snapshot.rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="rounded-[24px] bg-brand-surface px-4 py-8 text-center text-sm text-slate-500">
-                    Nenhum item disponivel. Importe os arquivos na tela de Cotacoes.
+                  <td colSpan={8} className="rounded-[24px] bg-brand-surface px-4 py-8 text-center text-sm text-slate-500">
+                    Nenhum item disponível. Importe os arquivos na tela de Cotações.
                   </td>
                 </tr>
               ) : (
-                snapshot.rows.map((row) => (
+                snapshot.rows.map((row) => {
+                  const compRow = pepaSnapshot.comparisonRows.find((r) => r.sku === row.sku && r.description === row.description);
+                  return (
                   <tr key={`${row.sku}-${row.description}`} className="bg-brand-surface text-sm text-slate-600">
                     <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
+                    <td className="px-4 py-4 text-slate-500">{compRow?.supplierRef ?? "—"}</td>
                     <td className="px-4 py-4">{row.description}</td>
                     <td className="px-4 py-4">{formatQuantity(row.quantity)}</td>
                     <td className="px-4 py-4">{row.supplier}</td>
@@ -218,7 +222,8 @@ export default function PedidoFinalPepaPage() {
                       </span>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
