@@ -28,6 +28,7 @@ export default function CotacoesPepaPage() {
   const [editingQtyKey, setEditingQtyKey] = useState<string | null>(null);
   const [adjustedQty, setAdjustedQty] = useState("");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [locallyAcceptedDesc, setLocallyAcceptedDesc] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -320,9 +321,10 @@ export default function CotacoesPepaPage() {
                     row.offers?.[0] ??
                     null;
                   const qtyDivergence = hasQuantityDivergence(row);
-                  const hasAnyRawDivergence = priceDivergence || qtyDivergence || (row.descriptionMismatch === true);
-                  const anyDivergence = hasAnyRawDivergence && row.selectionMode !== "manual";
                   const rowKey = `${row.sku}-${row.description}`;
+                  const effectiveDescMismatch = row.descriptionMismatch === true && !locallyAcceptedDesc.has(rowKey);
+                  const hasAnyRawDivergence = priceDivergence || qtyDivergence || effectiveDescMismatch;
+                  const anyDivergence = hasAnyRawDivergence && row.selectionMode !== "manual";
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const rowStyle = { backgroundColor: anyDivergence ? "#fef2f2" : "#f5f7fa" };
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
@@ -448,15 +450,23 @@ export default function CotacoesPepaPage() {
                               Revisado
                             </span>
                           )}
-                          {row.descriptionMismatch === true && !priceDivergence && !qtyDivergence && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
+                          {effectiveDescMismatch && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
                             <div className="mt-1">
                               <button
                                 type="button"
-                                onClick={() => void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined)}
+                                onClick={() => {
+                                  if (!priceDivergence && !qtyDivergence) {
+                                    // Unica divergencia era descrição — salva e resolve o item
+                                    void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined);
+                                  } else {
+                                    // Ainda ha outras divergencias — aceita descrição localmente e mantém o item na tela
+                                    setLocallyAcceptedDesc((prev) => { const next = new Set(prev); next.add(rowKey); return next; });
+                                  }
+                                }}
                                 disabled={savingRowKey === rowKey}
                                 className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
                               >
-                                {savingRowKey === rowKey ? "Salvando..." : "Aceitar descrição"}
+                                Aceitar descrição
                               </button>
                             </div>
                           )}
@@ -689,7 +699,7 @@ export default function CotacoesPepaPage() {
                 <td style={{ padding: "6px 8px" }}>{row.unit}</td>
                 <td style={{ padding: "6px 8px" }}>{row.bestSupplier ?? "—"}</td>
                 <td style={{ padding: "6px 8px" }}>{row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}</td>
-                <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.bestUnitPrice != null ? formatCurrency(row.bestUnitPrice) : "—"}</td>
+                <td style={{ padding: "6px 8px", fontWeight: 600, color: hasPriceDivergence(row) ? "#b91c1c" : "inherit" }}>{row.bestUnitPrice != null ? formatCurrency(row.bestUnitPrice) : "—"}</td>
                 <td style={{ padding: "6px 8px" }}>{row.bestTotal != null ? formatCurrency(row.bestTotal) : "—"}</td>
               </tr>
               );
