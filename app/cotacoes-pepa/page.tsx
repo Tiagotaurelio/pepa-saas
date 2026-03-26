@@ -442,8 +442,8 @@ export default function CotacoesPepaPage() {
                       </td>
                       <td className="rounded-r-[24px] px-4 py-4">
                         <div className="flex flex-col gap-2">
-                          <span className={comparisonStatusClasses(row.itemStatus)}>
-                            {row.itemStatus === "quoted" ? "Cotado" : "Pendente"}
+                          <span className={comparisonStatusClasses(anyDivergence ? row.itemStatus : "quoted")}>
+                            {anyDivergence && row.itemStatus !== "quoted" ? "Pendente" : "Cotado"}
                           </span>
                           {row.selectionMode === "manual" && hasAnyRawDivergence && (
                             <span className="inline-flex w-fit rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
