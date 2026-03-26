@@ -414,7 +414,7 @@ export default function CotacoesPepaPage() {
                       <td className="px-4 py-4">{row.unit}</td>
                       <td className="px-4 py-4">
                         <div className="flex flex-col gap-1">
-                          <span>{row.bestSupplier ?? "Aguardando"}</span>
+                          <span>{row.bestSupplier ?? "—"}</span>
                           {hasMultipleOffers && (
                             <button
                               type="button"
