@@ -143,6 +143,7 @@ export default function CotacoesPepaPage() {
   }
 
   const visibleRows = snapshot.comparisonRows.filter((row) => !showOnlyDivergences || hasDivergence(row));
+  const singleSupplier = snapshot.suppliers.length === 1 ? snapshot.suppliers[0].supplierName : null;
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedRows.has(`${r.sku}-${r.description}`));
   const selectedRowsData = snapshot.comparisonRows.filter((row) => {
     if (!selectedRows.has(`${row.sku}-${row.description}`)) return false;
@@ -414,7 +415,7 @@ export default function CotacoesPepaPage() {
                       <td className="px-4 py-4">{row.unit}</td>
                       <td className="px-4 py-4">
                         <div className="flex flex-col gap-1">
-                          <span>{row.bestSupplier ?? "—"}</span>
+                          <span>{row.bestSupplier ?? singleSupplier ?? "—"}</span>
                           {hasMultipleOffers && (
                             <button
                               type="button"

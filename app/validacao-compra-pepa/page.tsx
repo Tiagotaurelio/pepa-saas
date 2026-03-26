@@ -24,6 +24,7 @@ export default function ValidacaoCompraPepaPage() {
   }
 
   const divergentCount = rows.filter(isRowDivergent).length;
+  const singleSupplier = pepaSnapshot.suppliers.length === 1 ? pepaSnapshot.suppliers[0].supplierName : null;
 
   const flexTotal = rows.reduce((sum, row) => {
     return sum + (row.baseUnitPrice != null ? row.baseUnitPrice * row.requestedQuantity : 0);
@@ -152,7 +153,7 @@ export default function ValidacaoCompraPepaPage() {
                       <td className="rounded-l-[24px] px-4 py-4 font-medium text-brand-ink">{row.sku}</td>
                       <td className="px-4 py-4">{row.description}</td>
                       <td className="px-4 py-4">{formatQuantity(row.requestedQuantity)}</td>
-                      <td className="px-4 py-4">{row.bestSupplier ?? "—"}</td>
+                      <td className="px-4 py-4">{row.bestSupplier ?? singleSupplier ?? "—"}</td>
                       <td className="px-4 py-4 text-slate-500">
                         {row.baseUnitPrice != null ? formatCurrency(row.baseUnitPrice) : "—"}
                       </td>
