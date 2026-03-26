@@ -78,10 +78,33 @@ type StoredUploadMeta = {
 
 export async function readPepaSnapshot(tenantId: string, roundId?: string): Promise<PepaSnapshot> {
   if (roundId) {
-    return (await loadPepaSnapshotByRoundId(tenantId, roundId)) ?? getPepaSnapshot();
+    const snapshot = (await loadPepaSnapshotByRoundId(tenantId, roundId)) ?? getPepaSnapshot();
+    return patchSnapshotDescriptionMismatches(snapshot);
   }
 
-  return (await loadLatestPepaSnapshot(tenantId)) ?? getPepaSnapshot();
+  const snapshot = (await loadLatestPepaSnapshot(tenantId)) ?? getPepaSnapshot();
+  return patchSnapshotDescriptionMismatches(snapshot);
+}
+
+// Re-deriva supplierDescription e descriptionMismatch para rodadas salvas antes do campo existir
+function patchSnapshotDescriptionMismatches(snapshot: PepaSnapshot): PepaSnapshot {
+  const needsPatch = snapshot.comparisonRows.some((row) => row.descriptionMismatch === undefined);
+  if (!needsPatch) return snapshot;
+
+  const rows = snapshot.comparisonRows.map((row) => {
+    if (row.descriptionMismatch !== undefined) return row;
+    const supplierDescription =
+      row.supplierDescription ?? row.offers?.find((o) => o.supplierDescription)?.supplierDescription ?? null;
+    const descriptionMismatch =
+      supplierDescription != null &&
+      supplierDescription !== `Produto ${row.supplierRef ?? row.sku}` &&
+      !supplierDescription.startsWith("Produto ")
+        ? normalizeDescription(supplierDescription) !== normalizeDescription(row.description)
+        : false;
+    return { ...row, supplierDescription: supplierDescription ?? null, descriptionMismatch };
+  });
+
+  return { ...snapshot, comparisonRows: rows };
 }
 
 export async function readPepaRounds(tenantId: string): Promise<PepaUploadRoundSummary[]> {
@@ -1017,16 +1040,21 @@ function parseSupplierQuotePdfLines(lines: string[]): SupplierQuoteRow[] {
     let description = "";
 
     // tenta extrair seq+cod+descrição da própria linha NCM
-    const seqCodInline = beforeNcm.match(/^(\d{1,2})(\d{4,6})(.*)/);
-    if (seqCodInline) {
-      cod = seqCodInline[2];
-      description = seqCodInline[3].trim();
+    // Suporta formato espaçado ("9 14393 DESCRICAO") e colado ("914393DESCRICAO")
+    const seqCodMatch =
+      beforeNcm.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
+      beforeNcm.match(/^(\d{1,2}?)(\d{4,6})([A-Za-zÀ-ÿ].*)/);
+    if (seqCodMatch) {
+      cod = seqCodMatch[2];
+      description = seqCodMatch[3].trim();
     } else {
       // descrição está em linhas anteriores — busca para trás
       for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
         const prev = (lines[j] ?? "").trim();
         if (!prev || prev.startsWith("$") || /^\d+\$/.test(prev)) break;
-        const itemStart = prev.match(/^(\d{1,2})(\d{4,6})(.*)/);
+        const itemStart =
+          prev.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
+          prev.match(/^(\d{1,2}?)(\d{4,6})([A-Za-zÀ-ÿ].*)/);
         if (itemStart) {
           cod = itemStart[2];
           const descParts: string[] = [];
