@@ -315,7 +315,7 @@ export default function CotacoesPepaPage() {
                     row.offers?.[0] ??
                     null;
                   const qtyDivergence = hasQuantityDivergence(row);
-                  const anyDivergence = priceDivergence || qtyDivergence;
+                  const anyDivergence = priceDivergence || qtyDivergence || (row.descriptionMismatch === true);
                   const rowKey = `${row.sku}-${row.description}`;
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
