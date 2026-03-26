@@ -143,7 +143,12 @@ export default function CotacoesPepaPage() {
 
   const visibleRows = snapshot.comparisonRows.filter((row) => !showOnlyDivergences || hasDivergence(row));
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedRows.has(`${r.sku}-${r.description}`));
-  const selectedRowsData = snapshot.comparisonRows.filter((row) => selectedRows.has(`${row.sku}-${row.description}`));
+  const selectedRowsData = snapshot.comparisonRows.filter((row) => {
+    if (!selectedRows.has(`${row.sku}-${row.description}`)) return false;
+    // Itens aceitos via "Aceitar descrição" (sem divergencia de preco ou qtd) nao vao para o PDF de negociacao
+    if (row.selectionMode === "manual" && !hasPriceDivergence(row) && !hasQuantityDivergence(row)) return false;
+    return true;
+  });
 
   return (
     <div>
