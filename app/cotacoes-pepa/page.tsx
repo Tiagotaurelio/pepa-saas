@@ -318,6 +318,7 @@ export default function CotacoesPepaPage() {
                   const anyDivergence = priceDivergence || qtyDivergence || (row.descriptionMismatch === true);
                   const rowKey = `${row.sku}-${row.description}`;
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
+                  const rowStyle = { backgroundColor: anyDivergence ? "#fef2f2" : "#f5f7fa" };
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
                   const isExpanded = expandedOffersKey === rowKey;
 
@@ -330,6 +331,7 @@ export default function CotacoesPepaPage() {
                       exit={{ opacity: 0, scale: 0.95, transition: { duration: 0.25 } }}
                       transition={{ duration: 0.2 }}
                       className={`rounded-[24px] ${rowBg} text-sm text-slate-600`}
+                      style={rowStyle}
                     >
                       <td className="rounded-l-[24px] px-4 py-4">
                         <input
