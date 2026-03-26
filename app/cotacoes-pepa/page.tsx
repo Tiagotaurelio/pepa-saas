@@ -309,9 +309,13 @@ export default function CotacoesPepaPage() {
                 .filter((row) => !showOnlyDivergences || hasDivergence(row))
                 .flatMap((row) => {
                   const priceDivergence = hasPriceDivergence(row);
+                  // Usa a offer do fornecedor selecionado para garantir qtd correta
+                  const offer =
+                    row.offers?.find((o) => o.supplierName === row.bestSupplier) ??
+                    row.offers?.[0] ??
+                    null;
                   const qtyDivergence = hasQuantityDivergence(row);
                   const anyDivergence = priceDivergence || qtyDivergence;
-                  const offer = row.offers?.[0];
                   const rowKey = `${row.sku}-${row.description}`;
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
@@ -635,8 +639,17 @@ export default function CotacoesPepaPage() {
             {selectedRowsData.length === 0 ? (
               <tr><td colSpan={9} style={{ padding: "12px 8px", color: "#94a3b8", textAlign: "center" }}>Nenhum item selecionado.</td></tr>
             ) : selectedRowsData.map((row) => {
-              const printQtyDivergence = hasQuantityDivergence(row);
-              const printQtyQuoted = row.offers?.[0]?.quotedQuantity;
+              // Busca a offer do fornecedor selecionado; fallback para offers[0]
+              const bestOffer =
+                row.offers?.find((o) => o.supplierName === row.bestSupplier) ??
+                row.offers?.[0] ??
+                null;
+              const printQtyQuoted =
+                typeof bestOffer?.quotedQuantity === "number" && bestOffer.quotedQuantity > 0
+                  ? bestOffer.quotedQuantity
+                  : null;
+              const printQtyDivergence =
+                printQtyQuoted != null && Math.abs(printQtyQuoted - row.requestedQuantity) > 0.001;
               return (
               <tr key={`${row.sku}-${row.description}`} style={{ borderBottom: "1px solid #e2e8f0" }}>
                 <td style={{ padding: "6px 8px", fontWeight: 600 }}>{row.sku}</td>
@@ -649,7 +662,7 @@ export default function CotacoesPepaPage() {
                 </td>
                 <td style={{ padding: "6px 8px", backgroundColor: printQtyDivergence ? "#fff7ed" : "transparent" }}>
                   <div>{formatQuantity(row.requestedQuantity)}</div>
-                  {printQtyDivergence && printQtyQuoted != null && (
+                  {printQtyDivergence && (
                     <div style={{ fontSize: "9px", color: "#c2410c", marginTop: "2px" }}>Cotado: {formatQuantity(printQtyQuoted)}</div>
                   )}
                 </td>
@@ -673,9 +686,12 @@ function hasPriceDivergence(row: { bestUnitPrice: number | null; baseUnitPrice?:
   return Math.round(row.bestUnitPrice * 100) !== Math.round(row.baseUnitPrice * 100);
 }
 
-function hasQuantityDivergence(row: { requestedQuantity: number; offers?: { quotedQuantity?: number | null }[] }) {
-  const offer = row.offers?.[0];
-  if (!offer?.quotedQuantity) return false;
+function hasQuantityDivergence(row: { requestedQuantity: number; bestSupplier?: string | null; offers?: { supplierName: string; quotedQuantity?: number | null }[] }) {
+  const offer =
+    row.offers?.find((o) => o.supplierName === row.bestSupplier) ??
+    row.offers?.[0] ??
+    null;
+  if (!offer || typeof offer.quotedQuantity !== "number" || offer.quotedQuantity <= 0) return false;
   return Math.abs(offer.quotedQuantity - row.requestedQuantity) > 0.001;
 }
 
