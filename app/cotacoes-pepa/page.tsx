@@ -315,7 +315,8 @@ export default function CotacoesPepaPage() {
                     row.offers?.[0] ??
                     null;
                   const qtyDivergence = hasQuantityDivergence(row);
-                  const anyDivergence = priceDivergence || qtyDivergence || (row.descriptionMismatch === true);
+                  const hasAnyRawDivergence = priceDivergence || qtyDivergence || (row.descriptionMismatch === true);
+                  const anyDivergence = hasAnyRawDivergence && row.selectionMode !== "manual";
                   const rowKey = `${row.sku}-${row.description}`;
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const rowStyle = { backgroundColor: anyDivergence ? "#fef2f2" : "#f5f7fa" };
@@ -437,10 +438,22 @@ export default function CotacoesPepaPage() {
                           <span className={comparisonStatusClasses(row.itemStatus)}>
                             {row.itemStatus === "quoted" ? "Cotado" : "Pendente"}
                           </span>
-                          {row.selectionMode === "manual" && anyDivergence && (
+                          {row.selectionMode === "manual" && hasAnyRawDivergence && (
                             <span className="inline-flex w-fit rounded-full bg-green-100 px-2 py-0.5 text-xs font-semibold text-green-700">
                               Revisado
                             </span>
+                          )}
+                          {row.descriptionMismatch === true && !priceDivergence && !qtyDivergence && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
+                            <div className="mt-1">
+                              <button
+                                type="button"
+                                onClick={() => void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined)}
+                                disabled={savingRowKey === rowKey}
+                                className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
+                              >
+                                {savingRowKey === rowKey ? "Salvando..." : "Aceitar descrição"}
+                              </button>
+                            </div>
                           )}
                           {priceDivergence && snapshot.latestRound && !isClosedRound && (
                             <div className="mt-1 flex flex-col gap-1">
