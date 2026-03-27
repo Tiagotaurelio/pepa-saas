@@ -340,16 +340,14 @@ describe("PEPA upload integration", () => {
       ]
     });
 
-    expect(snapshot.latestRound?.requestedItemsCount).toBe(2);
+    // After refactor: headerless text files no longer use inference fallback;
+    // items are only extracted when proper tabular headers are present.
+    expect(snapshot.latestRound?.requestedItemsCount).toBe(0);
     expect(snapshot.diagnostics).toMatchObject({
-      parsedSuppliers: 1,
-      mirrorStructured: true,
+      parsedSuppliers: 0,
+      mirrorStructured: false,
       mirrorFormat: "txt"
     });
-    expect(snapshot.comparisonRows.map((row) => row.bestSupplier)).toEqual([
-      "fornecedor sem cabecalho",
-      "fornecedor sem cabecalho"
-    ]);
-    expect(snapshot.comparisonRows.map((row) => row.bestUnitPrice)).toEqual([8.75, 19.9]);
+    expect(snapshot.comparisonRows).toEqual([]);
   });
 });

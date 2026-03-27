@@ -5,7 +5,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
-import pdfParse from "pdf-parse";
+import { extractTextFromPdf } from "@/lib/pdf/extract-text";
+import { parseFlexPdf } from "@/lib/pdf/parser-flex";
+import { parseGenericSupplierPdf } from "@/lib/pdf/parser-generic";
+import { parseDecimal, isPlausibleMoneyValue, isPlausibleTotalValue, normalizeComparable, isLikelyUnit, looksLikeHeader } from "@/lib/pdf/parse-helpers";
 
 import {
   ComparisonOffer,
@@ -510,29 +513,44 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
     return [];
   }
 
-  // Parser dedicado para PDF gerado pelo Flex (COMPRA DE MERCADORIA / RETORNO ORCAMENTO)
   if (file.name.toLowerCase().endsWith(".pdf")) {
-    const lines = await extractTextLines(file);
+    const { lines } = await extractTextFromPdf(file.buffer);
+    if (lines.length === 0) return [];
 
-    // Log para diagnóstico quando o arquivo-base não é reconhecido
-    if (lines.length > 0) {
-      console.log("[PEPA mirror debug] Primeiras 60 linhas de:", file.name);
-      lines.slice(0, 60).forEach((l, i) => console.log(`  [${i}] ${l}`));
+    // Try Flex parser first (internal PEPA format)
+    const flexItems = parseFlexPdf(lines);
+    if (flexItems.length > 0) {
+      return flexItems.map((item) => ({
+        sku: item.sku,
+        description: item.description,
+        unit: item.unit,
+        requestedQuantity: item.quantity,
+        source: "real-supplier-quote" as const,
+        baseUnitPrice: item.unitPrice > 0 ? item.unitPrice : undefined,
+        supplierRef: item.supplierRef
+      }));
     }
 
-    const flexItems = parseFlexOrderPdfLines(lines);
-    if (flexItems.length > 0) return flexItems;
+    // Fallback: try generic parser
+    const genericItems = parseGenericSupplierPdf(lines);
+    if (genericItems.length > 0) {
+      return genericItems.map((item) => ({
+        sku: item.sku,
+        description: item.description,
+        unit: item.unit,
+        requestedQuantity: item.quantity,
+        source: "real-supplier-quote" as const,
+        baseUnitPrice: item.unitPrice > 0 ? item.unitPrice : undefined
+      }));
+    }
 
-    // Tenta formato CORFIO RETORNO ORCAMENTO (linhas com seq+cod+desc+un+qtd na mesma linha)
-    const corFioItems = parseCorFioRetornoOrcamentoPdfLines(lines);
-    if (corFioItems.length > 0) return corFioItems;
-
-    return inferRequestedItemsFromLines(lines);
+    return [];
   }
 
+  // Non-PDF files: keep existing tabular parsing logic
   const table = await parseTabularFile(file);
   if (!table) {
-    return inferRequestedItemsFromLines(await extractTextLines(file));
+    return [];
   }
 
   const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item"]);
@@ -541,7 +559,7 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
   const quantityIndex = findHeaderIndex(table.headers, ["quantidade", "qtd", "qtde"]);
 
   if (skuIndex < 0 || descriptionIndex < 0 || quantityIndex < 0) {
-    return inferRequestedItemsFromRows(table.rows, table.rawLines);
+    return [];
   }
 
   return table.rows
@@ -558,6 +576,7 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
 async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierFile> {
   const supplierName = inferSupplierName(file.name);
   const capability = classifyUploadFile(file);
+
   if (!capability.canUseTabularParser) {
     return {
       supplierName,
@@ -571,35 +590,63 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     };
   }
 
-  // Parser dedicado para PDF de orçamento do fornecedor
   if (file.name.toLowerCase().endsWith(".pdf")) {
-    const lines = await extractTextLines(file);
-    const quoteItems = parseSupplierQuotePdfLines(lines);
-    if (quoteItems.length > 0) {
+    const { lines } = await extractTextFromPdf(file.buffer);
+
+    if (lines.length === 0) {
+      return {
+        supplierName,
+        sourceFile: file.name,
+        extractionStatus: "ocr-required",
+        detectedFormat: "pdf",
+        quotedItems: [],
+        paymentTerms: "Nao lido",
+        freightTerms: "Nao lido",
+        quoteDate: null
+      };
+    }
+
+    const genericItems = parseGenericSupplierPdf(lines);
+    if (genericItems.length > 0) {
       return {
         supplierName,
         sourceFile: file.name,
         extractionStatus: "parsed",
         detectedFormat: "pdf",
-        quotedItems: quoteItems,
+        quotedItems: genericItems.map((item) => ({
+          sku: item.sku,
+          description: item.description,
+          unitPrice: item.unitPrice,
+          totalValue: item.totalValue,
+          quotedQuantity: item.quantity
+        })),
         paymentTerms: extractPdfPaymentTerms(lines),
-        freightTerms: "Nao informado",
+        freightTerms: extractPdfFreightTerms(lines),
         quoteDate: extractPdfQuoteDate(lines)
       };
     }
-  }
 
-  const table = await parseTabularFile(file);
-
-  if (!table) {
-    const inferredQuotes = inferSupplierQuoteRowsFromLines(await extractTextLines(file));
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus:
-        inferredQuotes.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      extractionStatus: "manual-review",
+      detectedFormat: "pdf",
+      quotedItems: [],
+      paymentTerms: extractPdfPaymentTerms(lines),
+      freightTerms: "Nao informado",
+      quoteDate: extractPdfQuoteDate(lines)
+    };
+  }
+
+  // Non-PDF: keep existing tabular logic
+  const table = await parseTabularFile(file);
+  if (!table) {
+    return {
+      supplierName,
+      sourceFile: file.name,
+      extractionStatus: "manual-review",
       detectedFormat: capability.detectedFormat,
-      quotedItems: inferredQuotes,
+      quotedItems: [],
       paymentTerms: "Nao lido",
       freightTerms: "Nao lido",
       quoteDate: null
@@ -609,23 +656,17 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item"]);
   const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao"]);
   const unitPriceIndex = findHeaderIndex(table.headers, [
-    "preco_unitario",
-    "preco_unit",
-    "valor_unitario",
-    "valor_unit",
-    "unit_price"
+    "preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price"
   ]);
   const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total"]);
 
   if ((skuIndex < 0 && descriptionIndex < 0) || unitPriceIndex < 0) {
-    const inferredQuotes = inferSupplierQuoteRowsFromRows(table.rows, table.rawLines);
     return {
       supplierName,
       sourceFile: file.name,
-      extractionStatus:
-        inferredQuotes.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+      extractionStatus: "manual-review",
       detectedFormat: capability.detectedFormat,
-      quotedItems: inferredQuotes,
+      quotedItems: [],
       paymentTerms: extractPaymentTerms(table),
       freightTerms: extractFreightTerms(table),
       quoteDate: extractQuoteDate(table)
@@ -636,7 +677,6 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     .map((columns) => {
       const unitPrice = parseDecimal(columns[unitPriceIndex] ?? "");
       const totalValue = totalIndex >= 0 ? parseDecimal(columns[totalIndex] ?? "") : NaN;
-
       return {
         sku: columns[skuIndex] ?? "",
         description: columns[descriptionIndex] ?? "",
@@ -655,7 +695,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   return {
     supplierName,
     sourceFile: file.name,
-    extractionStatus: quotedItems.length > 0 ? "parsed" : capability.canUseOcrFallback ? "ocr-required" : "manual-review",
+    extractionStatus: quotedItems.length > 0 ? "parsed" : "manual-review",
     detectedFormat: capability.detectedFormat,
     quotedItems,
     paymentTerms: extractPaymentTerms(table),
@@ -702,11 +742,7 @@ async function parseTabularFile(file: UploadFileInput): Promise<ParsedTable | nu
 
   if (lowerName.endsWith(".pdf")) {
     try {
-      const parsed = await pdfParse(file.buffer);
-      const lines = parsed.text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
+      const { lines } = await extractTextFromPdf(file.buffer);
 
       if (lines.length < 2) {
         return null;
@@ -758,29 +794,6 @@ function findHeaderIndex(headers: string[], aliases: string[]) {
 function parseDelimitedLine(line: string): string[] {
   const delimiter = line.includes("\t") ? "\t" : line.includes(";") ? ";" : line.includes("|") ? "|" : ",";
   return line.split(delimiter).map((part) => part.trim());
-}
-
-function parseDecimal(value: string): number {
-  const compact = value.trim().replace(/\s+/g, "");
-  const hasComma = compact.includes(",");
-  const hasDot = compact.includes(".");
-  let normalized = compact;
-
-  if (hasComma && hasDot) {
-    normalized = compact.replace(/\./g, "").replace(",", ".");
-  } else if (hasComma) {
-    normalized = compact.replace(",", ".");
-  }
-
-  return Number(normalized);
-}
-
-function isPlausibleMoneyValue(value: number) {
-  return Number.isFinite(value) && value > 0 && value <= 1_000_000;
-}
-
-function isPlausibleTotalValue(value: number | null) {
-  return value === null || (Number.isFinite(value) && value > 0 && value <= 100_000_000);
 }
 
 function normalizeHeader(value: string) {
@@ -957,344 +970,6 @@ function detectFileFormat(fileName: string): DetectedFileFormat {
   return "other";
 }
 
-async function extractTextLines(file: UploadFileInput): Promise<string[]> {
-  const lowerName = file.name.toLowerCase();
-
-  if (lowerName.endsWith(".pdf")) {
-    try {
-      const parsed = await pdfParse(file.buffer);
-      return parsed.text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
-  }
-
-  if (isStructuredTextFile(file.name, file.type)) {
-    return file.buffer
-      .toString("utf-8")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-  }
-
-  return [];
-}
-
-// ─── Parser para "Pedido de Vendas Cliente" (ex: ELETROCAL / CORFIO) ─────────
-// pdf-parse extrai cada linha horizontal como uma única string.
-// Formato por linha:
-//   {qt.ped} {un} {código} {descrição} [{Sim}] [{Nao}] {lances} {vlr.unit} {vlr.prod} {%ipi}
-// Ex: "8,00 RL 0007N-BC Cordão paralelo 300V 2x1,5mm2 - Branco 1 239,5536 1.916,43 0,00"
-// Bobina: "1.500,00 M B1025E-AZ Cabo flexivel 1KV 1x10,0mm2 HEPR - Azul Sim Nao 1 7,9690 11.953,45 0,00"
-function parseCorFioRetornoOrcamentoPdfLines(lines: string[]): RequestedItem[] {
-  const items: RequestedItem[] = [];
-  const seen = new Set<string>();
-  const UNIT_RE = /^(MT|RL|UN|UND|UNID|PC|PCA|M|L|KG|CX|KIT|CJ|GR|JG|TON|R|U)$/i;
-
-  // Detecta se o PDF é de "Pedido de Vendas" pelo cabeçalho
-  const isPedidoVendas = lines.some(l => /pedido\s+de\s+vendas/i.test(l));
-  if (!isPedidoVendas) return [];
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Linha de dado: começa com quantidade decimal (pode ter . e ,) + unidade + código alfanumérico
-    const startMatch = trimmed.match(/^([\d.,]+)\s+(\S+)\s+([A-Z0-9][A-Z0-9._-]*)\s+/i);
-    if (!startMatch) continue;
-
-    const qty = parseDecimal(startMatch[1]);
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-
-    const unitCandidate = startMatch[2];
-    if (!UNIT_RE.test(unitCandidate)) continue;
-    const unit = unitCandidate.toUpperCase();
-
-    const sku = startMatch[3];
-    // Rejeita se código parecer um número puro muito grande (provavelmente não é um código)
-    if (/^\d{8,}$/.test(sku)) continue;
-
-    const afterStart = trimmed.slice(startMatch[0].length).trim();
-    const tokens = afterStart.split(/\s+/);
-
-    // Remove os 3 últimos números: %ipi, vlr.prod, vlr.unit
-    let trailingNums = 0;
-    let vlrUnit = NaN;
-    const stripped = [...tokens];
-    while (stripped.length > 0 && /^[\d.,]+$/.test(stripped[stripped.length - 1] ?? "")) {
-      const val = parseDecimal(stripped.pop() ?? "");
-      trailingNums++;
-      if (trailingNums === 3) vlrUnit = val; // terceiro a partir do fim = vlr.unit
-    }
-    if (trailingNums < 3) continue;
-
-    // Remove lances (inteiro pequeno) e tokens opcionais como "Sim"/"Nao"
-    while (
-      stripped.length > 0 &&
-      /^(\d{1,2}|sim|nao|não|s|n)$/i.test(stripped[stripped.length - 1] ?? "")
-    ) {
-      stripped.pop();
-    }
-
-    const description = stripped.join(" ").trim();
-    if (!description || description.length < 3) continue;
-
-    const key = `${sku}-${description}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      items.push({
-        sku,
-        description,
-        unit,
-        requestedQuantity: qty,
-        source: "real-supplier-quote",
-        ...(Number.isFinite(vlrUnit) && vlrUnit > 0 ? { baseUnitPrice: vlrUnit } : {})
-      });
-    }
-  }
-
-  return items;
-}
-
-// ─── Parser para PDF do Flex (COMPRA DE MERCADORIA) — modo linha inteira ────
-// pdf-parse extrai cada linha horizontal como uma única string.
-// Formato por linha:
-//   {seq} {código} {descrição} {ref.forn} {un} {qtde} {dd/mm/yyyy} {vl.unit} {vl.total} {%ipi}
-// Ex: "1 5559 BOBINA CABO FLEXIVEL HEPR 1KV 10MM AZUL CORFIO WB1025E-AZ MT 1.500 05/03/2026 7,18 10770,00 0,00"
-function parseFlexOrderPdfLines(lines: string[]): RequestedItem[] {
-  const items: RequestedItem[] = [];
-  const seen = new Set<string>();
-  const UNIT_RE = /^(MT|RL|UN|UND|UNID|PC|PCA|M|L|KG|CX|KIT|CJ|GR|JG|TON|R|U)$/i;
-  const DATE_RE = /\b(\d{2}\/\d{2}\/\d{4})\b/;
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-
-    // Linha de dado começa com: seq (1-3 dígitos) + espaço + código PEPA (1-6 dígitos)
-    const seqCodeMatch = trimmed.match(/^(\d{1,3})\s+(\d{1,6})\s+/);
-    if (!seqCodeMatch) continue;
-
-    const seq = parseInt(seqCodeMatch[1], 10);
-    if (seq <= 0) continue;
-    const sku = seqCodeMatch[2];
-
-    const rest = trimmed.slice(seqCodeMatch[0].length);
-
-    // A data (Prev.Fat.) é âncora confiável: separa descrição+ref+un+qtde dos preços
-    const dateMatch = rest.match(DATE_RE);
-    if (!dateMatch) continue;
-
-    const dateIdx = rest.indexOf(dateMatch[1]);
-    const beforeDate = rest.slice(0, dateIdx).trim();
-    const afterDate = rest.slice(dateIdx + dateMatch[1].length).trim();
-
-    // Extrai vl.unit: primeiro número após a data
-    const priceMatch = afterDate.match(/^([\d.,]+)/);
-    const baseUnitPrice = priceMatch ? parseDecimal(priceMatch[1]) : NaN;
-
-    // Analisa a parte antes da data de trás para frente: qty, unit, ref_forn, description
-    const tokens = beforeDate.split(/\s+/);
-    if (tokens.length < 3) continue;
-
-    const qtyStr = tokens[tokens.length - 1] ?? "";
-    const qty = parseDecimal(qtyStr);
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-
-    const unitCandidate = tokens[tokens.length - 2] ?? "";
-    const isUnit = UNIT_RE.test(unitCandidate);
-    const unit = isUnit ? unitCandidate.toUpperCase() : "UN";
-    const endIdx = isUnit ? tokens.length - 2 : tokens.length - 1;
-
-    // Token imediatamente antes da unidade = ref. fornecedor (alfanumérico, não só dígitos)
-    const refCandidate = tokens[endIdx - 1] ?? "";
-    const isRef = refCandidate.length >= 2 && /^[A-Z0-9][A-Z0-9._-]*$/i.test(refCandidate) && !/^\d+$/.test(refCandidate);
-    const supplierRef = isRef ? refCandidate : undefined;
-    const descEnd = isRef ? endIdx - 1 : endIdx;
-
-    const description = tokens.slice(0, descEnd).join(" ").trim();
-    if (!description || description.length < 3) continue;
-
-    const key = `${sku}-${description}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      items.push({
-        sku,
-        description,
-        unit,
-        requestedQuantity: qty,
-        source: "real-supplier-quote",
-        ...(supplierRef ? { supplierRef } : {}),
-        ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
-      });
-    }
-  }
-
-  // Fallback: modo célula (um valor por linha) — para PDFs que extraem coluna a coluna
-  if (items.length === 0) {
-    return parseFlexOrderCellMode(lines);
-  }
-  return items;
-}
-
-// Fallback cell-mode para PDFs que extraem uma célula por linha
-function parseFlexOrderCellMode(lines: string[]): RequestedItem[] {
-  const items: RequestedItem[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    // Procura "Seq" como linha isolada (cabeçalho da tabela)
-    if (/^Seq$/i.test(lines[i] ?? "")) {
-      // Avança até a primeira linha de dados (pula cabeçalho de colunas)
-      i++;
-      while (i < lines.length && !/^\d+$/.test(lines[i] ?? "")) i++;
-      // Lê blocos de 10 linhas por item
-      while (i + 9 < lines.length) {
-        const seq = parseInt(lines[i] ?? "", 10);
-        const pepaCode = (lines[i + 1] ?? "").trim();
-        const description = (lines[i + 2] ?? "").trim();
-        // Colunas: [3]=Ref.Forn [4]=Un [5]=Qtde [6]=Prev.Fat [7]=Vl.Unit [8]=Vl.Total [9]=%Ipi
-        const supplierRef = (lines[i + 3] ?? "").trim();
-        const unit = (lines[i + 4] ?? "").trim();
-        const qty = parseDecimal(lines[i + 5] ?? "");
-        const vlUnitStr = (lines[i + 7] ?? "").trim();
-        if (
-          !isNaN(seq) && seq > 0 &&
-          /^\d+$/.test(pepaCode) && pepaCode.length >= 1 &&
-          description.length > 0 &&
-          Number.isFinite(qty) && qty > 0
-        ) {
-          const baseUnitPrice = parseDecimal(vlUnitStr);
-          items.push({
-            sku: pepaCode,
-            description,
-            unit: unit || "UN",
-            requestedQuantity: qty,
-            source: "real-supplier-quote",
-            ...(supplierRef.length > 0 ? { supplierRef } : {}),
-            ...(Number.isFinite(baseUnitPrice) && baseUnitPrice > 0 ? { baseUnitPrice } : {})
-          });
-          i += 10;
-        } else {
-          break;
-        }
-      }
-    } else {
-      i++;
-    }
-  }
-  return items;
-}
-
-// ─── Parser específico para PDF de orçamento do fornecedor ────────────────────
-// Âncora: cada item tem um NCM de 8 dígitos na linha de dados.
-// Linha NCM:  {seq}{cod}{descrição}{NCM8}{alq2%}${preçofinal}${ipi}
-// Linha total: ${total} (pode estar colada com qtde+preço)
-// Linha qtde:  {qtde}${preço}{ipi%}...
-function parseSupplierQuotePdfLines(lines: string[]): SupplierQuoteRow[] {
-  const items: SupplierQuoteRow[] = [];
-  const ncmLineRegex = /(\d{8})[\d.]*\s*%[^$]*\$([\d,.]+)\$([\d,.]+)/;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? "";
-    const ncmMatch = line.match(ncmLineRegex);
-    if (!ncmMatch) continue;
-
-    const finalUnitPrice = parseDecimal(ncmMatch[2]);
-    const ncmStartPos = line.indexOf(ncmMatch[1]);
-    const beforeNcm = line.substring(0, ncmStartPos);
-
-    let cod = "";
-    let description = "";
-
-    // tenta extrair seq+cod+descrição da própria linha NCM
-    // Suporta formato espaçado ("9 14393 DESCRICAO") e colado ("914393DESCRICAO")
-    const seqCodMatch =
-      beforeNcm.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
-      beforeNcm.match(/^(\d{1,2})(\d{4,6})([A-Za-zÀ-ÿ].*)/);
-    if (seqCodMatch) {
-      cod = seqCodMatch[2];
-      description = seqCodMatch[3].trim();
-    } else {
-      // descrição está em linhas anteriores — busca para trás
-      for (let j = i - 1; j >= Math.max(0, i - 6); j--) {
-        const prev = (lines[j] ?? "").trim();
-        if (!prev || prev.startsWith("$") || /^\d+\$/.test(prev)) break;
-        const itemStart =
-          prev.match(/^(\d{1,2})\s+(\d{4,6})\s+(.*)/) ??
-          prev.match(/^(\d{1,2})(\d{4,6})([A-Za-zÀ-ÿ].*)/);
-        if (itemStart) {
-          cod = itemStart[2];
-          const descParts: string[] = [];
-          const startDesc = itemStart[3].trim();
-          if (startDesc) descParts.push(startDesc);
-          for (let k = j + 1; k < i; k++) {
-            const dl = (lines[k] ?? "").trim();
-            if (dl) descParts.push(dl);
-          }
-          description = descParts.join(" ");
-          break;
-        }
-        // linha é continuação de descrição — será capturada quando acharmos o itemStart
-      }
-    }
-
-    if (!cod) continue;
-
-    // extrai total + qtde + preço base das linhas seguintes
-    const postData = extractSupplierPostNcmData(lines, i);
-    if (!postData) continue;
-
-    items.push({
-      sku: cod,
-      description: description || `Produto ${cod}`,
-      unitPrice: postData.unitPrice,
-      finalUnitPrice,
-      totalValue: postData.total,
-      quotedQuantity: postData.qty
-    });
-  }
-
-  return items;
-}
-
-// Extrai total + qtde + preço da(s) linha(s) após a linha NCM.
-// Nos PDFs do fornecedor os preços têm SEMPRE 4 casas decimais.
-// Ex: "150$1.06009.75 %..." → qty=150, price=1.0600
-// Ex: "$83.330412$6.60105.20 %..." → total=83.3304, qty=12, price=6.6010
-function extractSupplierPostNcmData(
-  lines: string[],
-  ncmIdx: number
-): { total: number; qty: number; unitPrice: number } | null {
-  const nextLine = (lines[ncmIdx + 1] ?? "").trim();
-  if (!nextLine.startsWith("$")) return null;
-
-  // Caso mesclado: $TOTAL{qty}$price (total e preço com 4 casas decimais)
-  const merged = nextLine.match(/^\$([\d,]+\.\d{4})(\d+)\$([\d]+\.\d{4})/);
-  if (merged) {
-    return {
-      total: parseDecimal(merged[1]),
-      qty: parseInt(merged[2], 10),
-      unitPrice: parseDecimal(merged[3])
-    };
-  }
-
-  // Caso separado: $TOTAL na linha, depois {qty}$price na próxima
-  const totalMatch = nextLine.match(/^\$([\d,]+\.\d{2,4})/);
-  if (!totalMatch) return null;
-  const total = parseDecimal(totalMatch[1]);
-
-  const qtyLine = (lines[ncmIdx + 2] ?? "").trim();
-  // Preço sempre com 4 casas decimais — para de forma precisa
-  const qtyMatch = qtyLine.match(/^(\d+)\$([\d]+\.\d{4})/);
-  if (!qtyMatch) return null;
-
-  return {
-    total,
-    qty: parseInt(qtyMatch[1], 10),
-    unitPrice: parseDecimal(qtyMatch[2])
-  };
-}
 
 // Extrai prazo de pagamento de linhas do PDF
 function extractPdfPaymentTerms(lines: string[]): string {
@@ -1309,6 +984,18 @@ function extractPdfPaymentTerms(lines: string[]): string {
   return "Aguardando parser comercial";
 }
 
+function extractPdfFreightTerms(lines: string[]): string {
+  for (const line of lines) {
+    const freteMatch = line.match(/frete\s*:\s*(.+)/i);
+    if (freteMatch) return freteMatch[1].trim();
+    if (/\b(CIF|FOB)\b/i.test(line)) {
+      const match = line.match(/\b(CIF|FOB)\b/i);
+      return match ? match[1].toUpperCase() : "Nao informado";
+    }
+  }
+  return "Nao informado";
+}
+
 // Extrai data da cotação do PDF do fornecedor
 function extractPdfQuoteDate(lines: string[]): string | null {
   for (const line of lines) {
@@ -1316,260 +1003,6 @@ function extractPdfQuoteDate(lines: string[]): string | null {
     if (m) return m[1];
   }
   return null;
-}
-
-function inferRequestedItemsFromRows(rows: string[][], rawLines: string[]): RequestedItem[] {
-  const inferredFromRows = rows
-    .map((row) => inferRequestedItemFromColumns(row))
-    .filter((item): item is RequestedItem => item !== null);
-
-  if (inferredFromRows.length > 0) {
-    return dedupeRequestedItems(inferredFromRows);
-  }
-
-  return inferRequestedItemsFromLines(rawLines);
-}
-
-function inferRequestedItemsFromLines(lines: string[]): RequestedItem[] {
-  return dedupeRequestedItems(
-    lines
-      .map((line) => inferRequestedItemFromLine(line))
-      .filter((item): item is RequestedItem => item !== null)
-  );
-}
-
-function inferRequestedItemFromColumns(columns: string[]): RequestedItem | null {
-  const cleaned = columns.map((value) => value.trim()).filter(Boolean);
-  if (cleaned.length < 3) {
-    return null;
-  }
-
-  const sku = cleaned[0] ?? "";
-  const quantity = parseDecimal(cleaned[cleaned.length - 1] ?? "");
-  if (!sku || !Number.isFinite(quantity) || quantity <= 0) {
-    return null;
-  }
-
-  const possibleUnit = cleaned[cleaned.length - 2] ?? "";
-  const hasUnit = isLikelyUnit(possibleUnit);
-  const description = cleaned.slice(1, hasUnit ? -2 : -1).join(" ").trim();
-  if (!description || looksLikeHeader(`${sku} ${description}`)) {
-    return null;
-  }
-
-  return {
-    sku,
-    description,
-    unit: hasUnit ? possibleUnit : "UN",
-    requestedQuantity: quantity,
-    source: "inferred-from-quote"
-  };
-}
-
-function inferRequestedItemFromLine(line: string): RequestedItem | null {
-  const compact = line.replace(/\s+/g, " ").trim();
-  if (!compact || looksLikeHeader(compact) || looksLikeAddressOrMeta(compact)) {
-    return null;
-  }
-
-  // Remove zeros finais do tipo %IPI (0,00 ou 0.00) que muitos PDFs trazem como última coluna
-  let searchIn = compact.replace(/(?:\s+0[,.]0+)+\s*$/, "").trim();
-
-  const quantityMatch = searchIn.match(/(\d+(?:[.,]\d+)?)$/);
-  if (!quantityMatch?.index) {
-    return null;
-  }
-
-  const quantity = parseDecimal(quantityMatch[1]);
-  if (!Number.isFinite(quantity) || quantity <= 0) {
-    return null;
-  }
-
-  const prefix = searchIn.slice(0, quantityMatch.index).trim();
-  const skuMatch = prefix.match(/^([A-Za-z0-9./_-]{3,})\s+(.+)$/);
-  if (!skuMatch) {
-    return null;
-  }
-
-  let unit = "UN";
-  let description = skuMatch[2].trim();
-  const unitMatch = description.match(/^(.*)\s+(UN|UND|UNID|ROLO|RL|M|MT|PCA|PC|KIT|CJ|CX)$/i);
-  if (unitMatch) {
-    description = unitMatch[1].trim();
-    unit = unitMatch[2].trim().toUpperCase();
-  }
-
-  if (!description) {
-    return null;
-  }
-
-  return {
-    sku: skuMatch[1],
-    description,
-    unit,
-    requestedQuantity: quantity,
-    source: "inferred-from-quote"
-  };
-}
-
-function inferSupplierQuoteRowsFromRows(rows: string[][], rawLines: string[]): SupplierQuoteRow[] {
-  const inferredFromRows = rows
-    .map((row) => inferSupplierQuoteRowFromColumns(row))
-    .filter((item): item is SupplierQuoteRow => item !== null);
-
-  if (inferredFromRows.length > 0) {
-    return dedupeSupplierQuoteRows(inferredFromRows);
-  }
-
-  return inferSupplierQuoteRowsFromLines(rawLines);
-}
-
-function inferSupplierQuoteRowsFromLines(lines: string[]): SupplierQuoteRow[] {
-  return dedupeSupplierQuoteRows(
-    lines
-      .map((line) => inferSupplierQuoteRowFromLine(line))
-      .filter((item): item is SupplierQuoteRow => item !== null)
-  );
-}
-
-function inferSupplierQuoteRowFromColumns(columns: string[]): SupplierQuoteRow | null {
-  const cleaned = columns.map((value) => value.trim()).filter(Boolean);
-  if (cleaned.length < 3) {
-    return null;
-  }
-
-  const sku = cleaned[0] ?? "";
-  if (!sku || looksLikeHeader(cleaned.join(" "))) {
-    return null;
-  }
-
-  const numericPositions = cleaned
-    .map((value, index) => ({ index, value: parseDecimal(value) }))
-    .filter((entry) => Number.isFinite(entry.value) && entry.value > 0 && isPlausibleMoneyValue(entry.value));
-
-  if (numericPositions.length === 0) {
-    return null;
-  }
-
-  const totalCandidate = numericPositions[numericPositions.length - 1];
-  const unitCandidate = numericPositions.length > 1 ? numericPositions[numericPositions.length - 2] : totalCandidate;
-  const description = cleaned.slice(1, unitCandidate.index).join(" ").trim();
-  if (!description) {
-    return null;
-  }
-
-  const totalValue =
-    numericPositions.length > 1 && totalCandidate.index > unitCandidate.index ? totalCandidate.value : null;
-
-  if (!isPlausibleMoneyValue(unitCandidate.value) || !isPlausibleTotalValue(totalValue)) {
-    return null;
-  }
-
-  return {
-    sku,
-    description,
-    unitPrice: unitCandidate.value,
-    totalValue
-  };
-}
-
-function inferSupplierQuoteRowFromLine(line: string): SupplierQuoteRow | null {
-  const compact = line.replace(/\s+/g, " ").trim();
-  if (!compact || looksLikeHeader(compact) || looksLikeAddressOrMeta(compact)) {
-    return null;
-  }
-
-  const skuMatch = compact.match(/^([A-Za-z0-9./_-]{3,})\s+(.+)$/);
-  if (!skuMatch) {
-    return null;
-  }
-
-  const remainder = skuMatch[2].trim();
-  const numericMatches = Array.from(remainder.matchAll(/(\d[\d.,]*)/g));
-  const plausibleMoneyMatches = numericMatches
-    .map((match) => ({
-      match,
-      parsed: parseDecimal(match[1])
-    }))
-    .filter((entry) => Number.isFinite(entry.parsed) && entry.parsed > 0 && isPlausibleMoneyValue(entry.parsed));
-
-  if (plausibleMoneyMatches.length === 0) {
-    return null;
-  }
-
-  const totalCandidate = plausibleMoneyMatches[plausibleMoneyMatches.length - 1]?.match;
-  const unitCandidate =
-    plausibleMoneyMatches.length > 1 ? plausibleMoneyMatches[plausibleMoneyMatches.length - 2]?.match : totalCandidate;
-  if (!totalCandidate || !unitCandidate) {
-    return null;
-  }
-  const description = remainder.slice(0, unitCandidate.index).trim();
-  if (!description) {
-    return null;
-  }
-
-  const unitPrice = parseDecimal(unitCandidate[1]);
-  const totalValue =
-    numericMatches.length > 1 && typeof totalCandidate.index === "number" && totalCandidate.index > (unitCandidate.index ?? 0)
-      ? parseDecimal(totalCandidate[1])
-      : null;
-
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0 || !isPlausibleMoneyValue(unitPrice) || !isPlausibleTotalValue(totalValue)) {
-    return null;
-  }
-
-  return {
-    sku: skuMatch[1],
-    description,
-    unitPrice,
-    totalValue: Number.isFinite(totalValue ?? NaN) && (totalValue ?? 0) > 0 ? totalValue : null
-  };
-}
-
-function dedupeRequestedItems(items: RequestedItem[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const key = `${normalizeComparable(item.sku)}::${normalizeComparable(item.description)}`;
-    if (!key || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function dedupeSupplierQuoteRows(rows: SupplierQuoteRow[]) {
-  const seen = new Set<string>();
-  return rows.filter((row) => {
-    const key = `${normalizeComparable(row.sku)}::${normalizeComparable(row.description)}`;
-    if (!key || seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function looksLikeHeader(value: string) {
-  if (/^sku[-_.]?\d+/i.test(value.trim())) {
-    return false;
-  }
-
-  const normalizedTokens = value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-
-  const headerTokens = new Set(["sku", "descricao", "quantidade", "qtd", "qtde", "preco", "valor", "unitario", "total"]);
-  const matchedHeaderTokens = normalizedTokens.filter((token) => headerTokens.has(token)).length;
-  return matchedHeaderTokens >= 2;
-}
-
-function isLikelyUnit(value: string) {
-  return /^(UN|UND|UNID|ROLO|RL|M|MT|PCA|PC|KIT|CJ|CX)$/i.test(value.trim());
 }
 
 function classifyUploadFile(file: UploadFileInput): FileCapability {
@@ -1617,15 +1050,6 @@ function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
   const quoteDescription = normalizeComparable(quote.description);
   const itemDescription = normalizeComparable(item.description);
   return Boolean(quoteDescription && itemDescription && quoteDescription === itemDescription);
-}
-
-function normalizeComparable(value: string) {
-  return value
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
 }
 
 function roundCurrency(value: number) {
