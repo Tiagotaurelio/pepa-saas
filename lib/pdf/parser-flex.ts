@@ -22,6 +22,15 @@ function parseQuantity(raw: string): number {
  * The date (DD/MM/YYYY) is the reliable anchor separating description from prices.
  */
 export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
+  // Try line-mode first (items on single lines with date anchor)
+  const lineItems = parseFlexLineMode(lines);
+  if (lineItems.length > 0) return lineItems;
+
+  // Fallback: cell-mode (one value per line, blocks of 10)
+  return parseFlexCellMode(lines);
+}
+
+function parseFlexLineMode(lines: string[]): ExtractedPdfItem[] {
   const items: ExtractedPdfItem[] = [];
   const seen = new Set<string>();
 
@@ -89,6 +98,69 @@ export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
         ipiPercent: Number.isFinite(ipiPercent) ? ipiPercent : null,
         ...(supplierRef ? { supplierRef } : {})
       });
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Cell-mode parser for Flex PDFs where pdf-parse extracts one cell per line.
+ * Looks for "Seq" header, then reads blocks of 10 lines per item.
+ * Block format: [seq, codigo, descricao, un, ref.forn, qtde, prev.fat, vl.unit, vl.total, %ipi]
+ */
+function parseFlexCellMode(lines: string[]): ExtractedPdfItem[] {
+  const items: ExtractedPdfItem[] = [];
+  let i = 0;
+
+  // Find the "Seq" header line
+  while (i < lines.length) {
+    if (/^Seq$/i.test(lines[i]?.trim() ?? "")) {
+      // Skip the header block (next lines are column names until we hit a pure number = first seq)
+      i++;
+      while (i < lines.length && !/^\d+$/.test(lines[i]?.trim() ?? "")) i++;
+      break;
+    }
+    i++;
+  }
+
+  // Read blocks of 10 lines per item
+  while (i + 9 < lines.length) {
+    const seq = parseInt(lines[i]?.trim() ?? "", 10);
+    const sku = (lines[i + 1] ?? "").trim();
+    const description = (lines[i + 2] ?? "").trim();
+    const unit = (lines[i + 3] ?? "").trim().toUpperCase() || "UN";
+    const supplierRef = (lines[i + 4] ?? "").trim();
+    const qtyStr = (lines[i + 5] ?? "").trim();
+    // lines[i + 6] = Prev.Fat (date, skip)
+    const unitPriceStr = (lines[i + 7] ?? "").trim();
+    const totalStr = (lines[i + 8] ?? "").trim();
+    const ipiStr = (lines[i + 9] ?? "").trim();
+
+    const quantity = parseQuantity(qtyStr);
+    const unitPrice = parseDecimal(unitPriceStr);
+    const totalValue = parseDecimal(totalStr);
+    const ipiPercent = parseDecimal(ipiStr);
+
+    if (
+      !isNaN(seq) && seq > 0 &&
+      sku.length >= 1 &&
+      description.length > 0 &&
+      Number.isFinite(quantity) && quantity > 0
+    ) {
+      items.push({
+        sku,
+        description,
+        unit,
+        quantity,
+        unitPrice: Number.isFinite(unitPrice) && unitPrice > 0 ? unitPrice : 0,
+        totalValue: Number.isFinite(totalValue) && totalValue > 0 ? totalValue : null,
+        ipiPercent: Number.isFinite(ipiPercent) ? ipiPercent : null,
+        ...(supplierRef.length > 0 ? { supplierRef } : {})
+      });
+      i += 10;
+    } else {
+      break;
     }
   }
 

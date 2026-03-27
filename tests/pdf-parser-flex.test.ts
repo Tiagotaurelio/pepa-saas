@@ -36,6 +36,60 @@ describe("parseFlexPdf", () => {
     expect(parseFlexPdf(lines)).toEqual([]);
   });
 
+  it("parses cell-mode Flex PDF (one value per line)", () => {
+    const lines = [
+      "PEPA DISTRIBUIDORA MAT. ELETRICOS",
+      "COMPRA DE MERCADORIA PARA",
+      "Seq",
+      "Código",
+      "Descrição",
+      "Un",
+      "Ref. Fornecedor",
+      "Qtde.",
+      "Prev.Fat.",
+      "Vl. Unit.",
+      "Vl. Total",
+      "%Ipi",
+      "1",
+      "14290",
+      "ABRACADEIRA NYLON 100X2.5MM 100PC PRETA FERTAK",
+      "PCT",
+      "1306",
+      "150",
+      "16/03/2026",
+      "1,06",
+      "159.00",
+      "9.75",
+      "2",
+      "14297",
+      "ABRACADEIRA NYLON 200X3.6MM 100PC PRETA FERTAK",
+      "PCT",
+      "1324",
+      "100",
+      "16/03/2026",
+      "2,95",
+      "295.00",
+      "9.75"
+    ];
+
+    const items = parseFlexPdf(lines);
+
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({
+      sku: "14290",
+      description: "ABRACADEIRA NYLON 100X2.5MM 100PC PRETA FERTAK",
+      unit: "PCT",
+      quantity: 150,
+      unitPrice: 1.06,
+      supplierRef: "1306"
+    });
+    expect(items[1]).toMatchObject({
+      sku: "14297",
+      quantity: 100,
+      unitPrice: 2.95
+    });
+  });
+
   it("handles OCR text with minor spacing variations", () => {
     const lines = [
       "COMPRA DE MERCADORIA",
