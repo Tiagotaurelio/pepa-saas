@@ -1,6 +1,10 @@
 import pdfParse from "pdf-parse";
 import type { TextExtractionResult } from "./types";
 
+/**
+ * Extract text lines from a PDF buffer.
+ * Strategy: pdf-parse first (fast). If 0 lines, use pdf2pic + Tesseract OCR.
+ */
 export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtractionResult> {
   // Step 1: Try pdf-parse (fast, works for text-based PDFs)
   const textLines = await extractWithPdfParse(buffer);
@@ -8,14 +12,10 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtraction
     return { lines: textLines, method: "pdf-parse" };
   }
 
-  // Step 2: Fallback to Tesseract OCR (only if enabled via env var)
-  // OCR requires language data download on first run and a PDF-to-image renderer.
-  // Skip OCR by default to avoid blocking requests with slow downloads.
-  if (process.env.PEPA_OCR_ENABLED === "true") {
-    const ocrLines = await extractWithTesseractWithTimeout(buffer, 15_000);
-    if (ocrLines.length > 0) {
-      return { lines: ocrLines, method: "tesseract-ocr" };
-    }
+  // Step 2: OCR fallback — convert PDF pages to images via pdf2pic, then Tesseract
+  const ocrLines = await extractWithOcr(buffer);
+  if (ocrLines.length > 0) {
+    return { lines: ocrLines, method: "tesseract-ocr" };
   }
 
   return { lines: [], method: "pdf-parse" };
@@ -33,37 +33,44 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string[]> {
   }
 }
 
-async function extractWithTesseractWithTimeout(buffer: Buffer, timeoutMs: number): Promise<string[]> {
-  const result = await Promise.race([
-    extractWithTesseract(buffer),
-    new Promise<string[]>((resolve) => setTimeout(() => resolve([]), timeoutMs))
-  ]);
-  return result;
-}
-
-async function extractWithTesseract(buffer: Buffer): Promise<string[]> {
+async function extractWithOcr(buffer: Buffer): Promise<string[]> {
   try {
+    const { fromBuffer } = await import("pdf2pic");
     const { createWorker } = await import("tesseract.js");
-    // tesseract.js v5 can work with PDF buffers directly via recognize
-    // However, it works best with images. For now, try to use it with the buffer.
-    // If it fails, return empty gracefully.
 
-    const worker = await createWorker("por+eng", 1, {
-      // Provide a no-op errorHandler to prevent tesseract from throwing uncaught
-      // exceptions on invalid input. The Promise rejection (line 211 in createWorker)
-      // already propagates the error to our outer try/catch.
-      errorHandler: (_err: unknown) => { /* swallow — caught via Promise rejection */ },
+    const converter = fromBuffer(buffer, {
+      density: 200,
+      format: "png",
+      width: 1600,
+      height: 2200
     });
+
+    const allLines: string[] = [];
+    const worker = await createWorker("por");
+
     try {
-      // Try to recognize - tesseract.js can handle various formats
-      const { data } = await worker.recognize(buffer);
-      return data.text
-        .split(/\r?\n/)
-        .map((l: string) => l.trim())
-        .filter(Boolean);
+      // Process up to 5 pages (safety limit)
+      for (let pageNum = 1; pageNum <= 5; pageNum++) {
+        try {
+          const page = await converter(pageNum, { responseType: "buffer" });
+          if (!page.buffer || page.buffer.length === 0) break;
+
+          const { data } = await worker.recognize(page.buffer);
+          const pageLines = data.text
+            .split(/\r?\n/)
+            .map((l: string) => l.trim())
+            .filter(Boolean);
+          allLines.push(...pageLines);
+        } catch {
+          // No more pages or rendering failed
+          break;
+        }
+      }
     } finally {
       await worker.terminate();
     }
+
+    return allLines;
   } catch (err) {
     console.error("[extract-text] OCR fallback failed:", err);
     return [];

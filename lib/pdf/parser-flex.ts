@@ -22,12 +22,33 @@ function parseQuantity(raw: string): number {
  * The date (DD/MM/YYYY) is the reliable anchor separating description from prices.
  */
 export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
-  // Try line-mode first (items on single lines with date anchor)
+  // Try line-mode first on raw lines
   const lineItems = parseFlexLineMode(lines);
   if (lineItems.length > 0) return lineItems;
 
+  // Try line-mode on OCR-cleaned lines (remove | ] ! / artifacts from table borders)
+  const cleanedLines = lines.map(cleanOcrLine);
+  const ocrLineItems = parseFlexLineMode(cleanedLines);
+  if (ocrLineItems.length > 0) return ocrLineItems;
+
   // Fallback: cell-mode (one value per line, blocks of 10)
   return parseFlexCellMode(lines);
+}
+
+/**
+ * Clean OCR artifacts from table-based PDFs.
+ * Tesseract reads table borders as | ] [ ! characters.
+ * Example: "1 | 5559 BOBINA CABO... WB1025E-AZ | MT] 1.500 05/03/2026! 7,18 /10770.00|0.00"
+ * Becomes: "1  5559 BOBINA CABO... WB1025E-AZ  MT  1.500 05/03/2026  7,18  10770.00 0.00"
+ */
+function cleanOcrLine(line: string): string {
+  return line
+    .replace(/[|[\]!]/g, " ")       // Remove table border chars
+    .replace(/(\d{2})\/(\d{2})\/(\d{4})/g, "$1~$2~$3") // Protect dates from / removal
+    .replace(/\/(\d)/g, " $1")      // "/10770" → " 10770"
+    .replace(/~/g, "/")             // Restore dates
+    .replace(/\s+/g, " ")           // Collapse multiple spaces
+    .trim();
 }
 
 function parseFlexLineMode(lines: string[]): ExtractedPdfItem[] {
