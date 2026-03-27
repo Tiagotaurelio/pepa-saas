@@ -661,6 +661,28 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total"]);
 
   if ((skuIndex < 0 && descriptionIndex < 0) || unitPriceIndex < 0) {
+    // For .txt files with concatenated supplier format (e.g. CORFIO), try the generic parser
+    if (capability.detectedFormat === "txt" && hasConcatenatedSupplierLines(table.rawLines)) {
+      const genericItems = parseGenericSupplierPdf(table.rawLines);
+      if (genericItems.length > 0) {
+        return {
+          supplierName,
+          sourceFile: file.name,
+          extractionStatus: "parsed",
+          detectedFormat: capability.detectedFormat,
+          quotedItems: genericItems.map((item) => ({
+            sku: item.sku,
+            description: item.description,
+            unitPrice: item.unitPrice,
+            totalValue: item.totalValue,
+            quotedQuantity: item.quantity
+          })),
+          paymentTerms: extractPdfPaymentTerms(table.rawLines),
+          freightTerms: extractPdfFreightTerms(table.rawLines),
+          quoteDate: extractPdfQuoteDate(table.rawLines)
+        };
+      }
+    }
     return {
       supplierName,
       sourceFile: file.name,
@@ -1003,6 +1025,15 @@ function extractPdfQuoteDate(lines: string[]): string | null {
     if (m) return m[1];
   }
   return null;
+}
+
+/**
+ * Returns true if at least one line looks like the CORFIO concatenated format:
+ * starts with a Brazilian quantity decimal followed by a unit code (e.g. "8,00RL", "1.500,00M ").
+ */
+function hasConcatenatedSupplierLines(lines: string[]): boolean {
+  const RE = /^\d{1,3}(?:\.\d{3})*,\d{2}\s*[A-Z]{1,4}[\sA-Z0-9]/;
+  return lines.some((line) => RE.test(line.trim()));
 }
 
 function classifyUploadFile(file: UploadFileInput): FileCapability {

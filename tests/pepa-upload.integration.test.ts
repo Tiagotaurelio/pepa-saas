@@ -313,6 +313,45 @@ describe("PEPA upload integration", () => {
     });
   });
 
+  it("parses supplier text file with concatenated CORFIO format", async () => {
+    const tenantId = "tenant-corfio-pdf";
+
+    const mirrorCsv = [
+      "sku,descricao,unidade,quantidade",
+      "0007N-BC,Cordão paralelo 300V 2x1.5mm2 Branco,RL,8",
+      "0008N-BC,Cordão paralelo 300V 2x2.5mm2 Branco,RL,19"
+    ].join("\n");
+
+    const corfioLines = [
+      "Pedido de Vendas ClientePEDIDO NR: 12040718",
+      "ELETROCAL IND E COM MAT ELETRICOS LTDA",
+      "Qt. Ped UNCódigoDescrição dos itensVariar   Mad.LancesVlr. UnitVlr.Prod.%IPI",
+      "8,00RL0007N-BC        Cordão paralelo 300V 2x1,5mm2 - Branco                1239,55361.916,430,00",
+      "19,00RL0008N-BC        Cordão paralelo 300V 2x2,5mm2 - Branco                1385,71057.328,500,00"
+    ].join("\n");
+
+    const snapshot = await persistPepaUploadRound({
+      tenantId,
+      mirrorFile: {
+        name: "mirror.csv",
+        type: "text/csv",
+        buffer: Buffer.from(mirrorCsv)
+      },
+      supplierFiles: [
+        {
+          name: "Orcamento Corfio.txt",
+          type: "text/plain",
+          buffer: Buffer.from(corfioLines)
+        }
+      ]
+    });
+
+    const round = snapshot.latestRound;
+    expect(round).toBeTruthy();
+    expect(snapshot.suppliers.length).toBe(1);
+    expect(snapshot.suppliers[0].quotedItemsCount).toBeGreaterThanOrEqual(2);
+  });
+
   it("infers mirror items and supplier quotes from mixed text without strict headers", async () => {
     const tenantId = "tenant-inferred";
     const mirrorTxt = [
