@@ -2,15 +2,23 @@ import pdfParse from "pdf-parse";
 import type { TextExtractionResult } from "./types";
 
 export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtractionResult> {
-  // Step 1: Try pdf-parse
+  // Step 1: Try pdf-parse (fast, works for text-based PDFs)
   const textLines = await extractWithPdfParse(buffer);
   if (textLines.length > 0) {
     return { lines: textLines, method: "pdf-parse" };
   }
 
-  // Step 2: Fallback to Tesseract OCR
-  const ocrLines = await extractWithTesseract(buffer);
-  return { lines: ocrLines, method: "tesseract-ocr" };
+  // Step 2: Fallback to Tesseract OCR (only if enabled via env var)
+  // OCR requires language data download on first run and a PDF-to-image renderer.
+  // Skip OCR by default to avoid blocking requests with slow downloads.
+  if (process.env.PEPA_OCR_ENABLED === "true") {
+    const ocrLines = await extractWithTesseractWithTimeout(buffer, 15_000);
+    if (ocrLines.length > 0) {
+      return { lines: ocrLines, method: "tesseract-ocr" };
+    }
+  }
+
+  return { lines: [], method: "pdf-parse" };
 }
 
 async function extractWithPdfParse(buffer: Buffer): Promise<string[]> {
@@ -23,6 +31,14 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+async function extractWithTesseractWithTimeout(buffer: Buffer, timeoutMs: number): Promise<string[]> {
+  const result = await Promise.race([
+    extractWithTesseract(buffer),
+    new Promise<string[]>((resolve) => setTimeout(() => resolve([]), timeoutMs))
+  ]);
+  return result;
 }
 
 async function extractWithTesseract(buffer: Buffer): Promise<string[]> {
