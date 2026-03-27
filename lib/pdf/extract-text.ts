@@ -12,10 +12,21 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtraction
     return { lines: textLines, method: "pdf-parse" };
   }
 
-  // Step 2: OCR fallback — convert PDF pages to images via pdf2pic, then Tesseract
-  const ocrLines = await extractWithOcr(buffer);
-  if (ocrLines.length > 0) {
-    return { lines: ocrLines, method: "tesseract-ocr" };
+  // Step 2: OCR fallback — only when explicitly enabled.
+  // Tesseract.js worker crashes inside Next.js/Turbopack server due to module
+  // resolution issues. OCR should be run via CLI script or background job instead.
+  if (process.env.PEPA_OCR_ENABLED === "true") {
+    try {
+      const ocrLines = await Promise.race([
+        extractWithOcr(buffer),
+        new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 60_000))
+      ]);
+      if (ocrLines.length > 0) {
+        return { lines: ocrLines, method: "tesseract-ocr" };
+      }
+    } catch {
+      // OCR failed, fall through to empty result
+    }
   }
 
   return { lines: [], method: "pdf-parse" };
