@@ -11,13 +11,11 @@ import type { TextExtractionResult } from "./types";
  * Strategy: pdf-parse first (fast). If 0 lines, spawn OCR worker process.
  */
 export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtractionResult> {
-  // Step 1: Try pdf-parse (fast, works for text-based PDFs)
   const textLines = await extractWithPdfParse(buffer);
   if (textLines.length > 0) {
     return { lines: textLines, method: "pdf-parse" };
   }
 
-  // Step 2: OCR via child process (avoids Tesseract crashing Next.js server)
   const ocrLines = await extractWithOcrWorker(buffer);
   if (ocrLines.length > 0) {
     return { lines: ocrLines, method: "tesseract-ocr" };
@@ -39,20 +37,19 @@ async function extractWithPdfParse(buffer: Buffer): Promise<string[]> {
 }
 
 /**
- * Run OCR in a separate Node.js process to avoid Tesseract.js
- * worker module resolution issues inside Next.js/Turbopack.
+ * Run OCR in a separate Node.js process to avoid crashing Next.js server.
+ * The worker script (scripts/ocr-worker.mjs) uses pdf2pic + tesseract.js
+ * which have native dependencies that conflict with webpack/turbopack.
  */
 async function extractWithOcrWorker(buffer: Buffer): Promise<string[]> {
   const tempPath = join(tmpdir(), `pepa-ocr-${randomUUID()}.pdf`);
 
   try {
-    // Write buffer to temp file
     await writeFile(tempPath, buffer);
 
-    // Spawn the OCR worker script as a child process
     const workerScript = join(process.cwd(), "scripts", "ocr-worker.mjs");
     const lines = await new Promise<string[]>((resolve) => {
-      const timeout = setTimeout(() => resolve([]), 90_000); // 90s timeout
+      const timeout = setTimeout(() => resolve([]), 90_000);
 
       execFile("node", [workerScript, tempPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
         clearTimeout(timeout);
@@ -75,7 +72,6 @@ async function extractWithOcrWorker(buffer: Buffer): Promise<string[]> {
     console.error("[extract-text] OCR worker error:", err);
     return [];
   } finally {
-    // Clean up temp file
     unlink(tempPath).catch(() => {});
   }
 }
