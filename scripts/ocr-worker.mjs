@@ -17,10 +17,10 @@ if (!pdfPath) {
 try {
   const buf = readFileSync(pdfPath);
   const converter = fromBuffer(buf, {
-    density: 200,
+    density: 300,
     format: "png",
-    width: 1600,
-    height: 2200
+    width: 2400,
+    height: 3300
   });
 
   const allLines = [];

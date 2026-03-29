@@ -43,10 +43,15 @@ export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
  */
 function cleanOcrLine(line: string): string {
   return line
-    .replace(/[|[\]!]/g, " ")       // Remove table border chars
+    .replace(/[|[\]()!]/g, " ")     // Remove table border chars and OCR parens
     .replace(/(\d{2})\/(\d{2})\/(\d{4})/g, "$1~$2~$3") // Protect dates from / removal
     .replace(/\/(\d)/g, " $1")      // "/10770" → " 10770"
     .replace(/~/g, "/")             // Restore dates
+    .replace(/\bIMT\b/gi, " MT ")   // OCR reads "IMT" or "IMTI" instead of "MT"
+    .replace(/\bIMTI\b/gi, " MT ")
+    .replace(/\bMTI\b/gi, " MT ")
+    .replace(/\b1(\d{2}\/\d{2}\/\d{4})\b/g, " $1") // "105/03/2026" → " 05/03/2026"
+    .replace(/(\d{2}\/\d{2}\/\d{4})[lLI]/g, "$1 ")  // "2026l" → "2026 " (OCR artifact)
     .replace(/\s+/g, " ")           // Collapse multiple spaces
     .trim();
 }
@@ -59,12 +64,16 @@ function parseFlexLineMode(lines: string[]): ExtractedPdfItem[] {
     const trimmed = line.trim();
 
     // Line must start with: seq (1-3 digits) + space + PEPA code (1-6 digits)
+    // OCR sometimes merges seq numbers (e.g., "18" from "1" + next line's "8")
+    // so we also try matching with a longer seq prefix
     const seqCodeMatch = trimmed.match(/^(\d{1,3})\s+(\d{1,6})\s+/);
     if (!seqCodeMatch) continue;
 
     const seq = parseInt(seqCodeMatch[1], 10);
     if (seq <= 0) continue;
     const sku = seqCodeMatch[2];
+    // Skip if SKU is too short (likely OCR noise)
+    if (sku.length < 1) continue;
 
     const rest = trimmed.slice(seqCodeMatch[0].length);
 
