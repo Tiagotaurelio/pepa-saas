@@ -359,11 +359,16 @@ export function parseGenericSupplierPdf(lines: string[]): ExtractedPdfItem[] {
 //   Optional: packaging type (CX, SACO, BR)
 //   Numbers line: {price},{decimal}{qty},{decimal}...
 
-const UNIT_DATE_RE = /^(UN|CT|KG|CX|KIT|MT|RL|PC|PCT|M|L)\s*(\d{2}\/\d{2}\/\d{2,4})/i;
-// Match seq+code at start of line. Prefer longer code (5-6 digits) over longer seq.
+const UNIT_DATE_RE = /^(UN|CT|KG|CX|KIT|MT|RL|PC|PCT|M|L)\s*(\d{2}\/\d{2}\/(?:\d{4}|\d{2}))/i;
+// Match seq+code at start of line.
+// Strategy: try 2-digit seq + 5 digit code first (handles seq 10-32),
+// then 1-digit seq + 5 digit code, then other combinations.
 function matchItemStart(line: string): { seq: number; sku: string; descStart: number } | null {
-  // Try 1-digit seq + 5-6 digit code first (most common)
-  const m1 = line.match(/^(\d)(\d{5,6})([A-ZÀ-ÿ])/);
+  // Try 2-digit seq + 5-digit code (e.g., "3126517PO..." → seq=31, code=26517)
+  const m2a = line.match(/^(\d{2})(\d{5})([A-ZÀ-ÿ])/);
+  if (m2a) return { seq: parseInt(m2a[1], 10), sku: m2a[2], descStart: m2a[1].length + m2a[2].length };
+  // Try 1-digit seq + 5 digit code (e.g., "126444AR..." → seq=1, code=26444)
+  const m1 = line.match(/^(\d)(\d{5})([A-ZÀ-ÿ])/);
   if (m1) return { seq: parseInt(m1[1], 10), sku: m1[2], descStart: m1[1].length + m1[2].length };
   // Then 2-digit seq + 4-6 digit code
   const m2 = line.match(/^(\d{2})(\d{4,6})([A-ZÀ-ÿ])/);

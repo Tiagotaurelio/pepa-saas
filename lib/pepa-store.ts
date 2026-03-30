@@ -1283,36 +1283,48 @@ function extractDimension(desc: string): string | null {
   return `${left}x${right}`;
 }
 
-/** Product type keywords for dimension matching safety */
+/** Product type keywords for dimension/fraction matching safety */
 const PRODUCT_TYPE_KEYWORDS: string[][] = [
-  ["parafuso", "pf"],
+  ["parafuso", "pf ", "p inox"],
   ["chumbador", "cbj"],
   ["arruela"],
-  ["barra", "roscada"],
-  ["porca"],
+  ["barra", "roscada", "roscavel"],
+  ["porca", "po f"],
+  ["inox"],
 ];
 
-function matchByDimension(descA: string, descB: string): boolean {
-  const dimA = extractDimension(descA);
-  const dimB = extractDimension(descB);
-  if (!dimA || !dimB || dimA !== dimB) return false;
+/**
+ * Extract fraction pattern like "1/4", "5/16", "1/2" from description.
+ * Common in BARRA and PORCA items.
+ */
+function extractFraction(desc: string): string | null {
+  const m = desc.match(/(\d+)\/(\d+)/);
+  if (!m) return null;
+  return `${m[1]}/${m[2]}`;
+}
 
-  // Both descriptions must share at least one product type keyword
+function matchByDimension(descA: string, descB: string): boolean {
   const lowerA = descA.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
   const lowerB = descB.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
+  // Check if both share a product type keyword
+  let sharedType = false;
   for (const group of PRODUCT_TYPE_KEYWORDS) {
-    const aHas = group.some((kw) => {
-      // Use word boundary-ish check: keyword appears as standalone token
-      const re = new RegExp(`(?:^|[\\s/])${kw}(?:[\\s/]|$)`);
-      return re.test(lowerA);
-    });
-    const bHas = group.some((kw) => {
-      const re = new RegExp(`(?:^|[\\s/])${kw}(?:[\\s/]|$)`);
-      return re.test(lowerB);
-    });
-    if (aHas && bHas) return true;
+    const aHas = group.some((kw) => lowerA.includes(kw));
+    const bHas = group.some((kw) => lowerB.includes(kw));
+    if (aHas && bHas) { sharedType = true; break; }
   }
+  if (!sharedType) return false;
+
+  // Try dimension match (e.g., "3.0X22")
+  const dimA = extractDimension(descA);
+  const dimB = extractDimension(descB);
+  if (dimA && dimB && dimA === dimB) return true;
+
+  // Try fraction match (e.g., "1/4", "5/16") — for BARRA, PORCA items
+  const fracA = extractFraction(descA);
+  const fracB = extractFraction(descB);
+  if (fracA && fracB && fracA === fracB) return true;
 
   return false;
 }
