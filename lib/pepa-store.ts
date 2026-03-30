@@ -59,6 +59,7 @@ type SupplierQuoteRow = {
   finalUnitPrice?: number;
   totalValue: number | null;
   quotedQuantity?: number;
+  unit?: string;
 };
 
 type ParsedSupplierFile = {
@@ -456,6 +457,67 @@ function normalizeDescription(value: string): string {
   return value.toUpperCase().replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Convert supplier unit price to match Flex unit.
+ * Common case: Flex uses MT (metros), supplier uses RL (rolo).
+ * A rolo typically contains the meters specified in the description (e.g., "100M").
+ * Conversion: price_per_RL / meters_per_roll = price_per_MT
+ */
+function convertSupplierPriceToFlexUnit(
+  supplierUnitPrice: number,
+  supplierUnit: string | undefined,
+  flexUnit: string,
+  flexDescription: string,
+  supplierQty: number | undefined,
+  flexQty: number
+): { convertedPrice: number; convertedQty: number | null } {
+  const sUnit = (supplierUnit ?? "").toUpperCase();
+  const fUnit = flexUnit.toUpperCase();
+
+  // No conversion needed if units match or supplier unit unknown
+  if (!sUnit || sUnit === fUnit) {
+    return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
+  }
+
+  // RL → MT conversion: find meters per roll from Flex description
+  if ((sUnit === "RL" || sUnit === "ROLO") && (fUnit === "MT" || fUnit === "M")) {
+    const metersMatch = flexDescription.match(/(\d+)\s*M\b/i);
+    const metersPerRoll = metersMatch ? parseInt(metersMatch[1], 10) : 100; // default 100M/RL
+    if (metersPerRoll > 0) {
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice / metersPerRoll),
+        convertedQty: supplierQty != null ? supplierQty * metersPerRoll : null
+      };
+    }
+  }
+
+  // MT → RL conversion (reverse)
+  if ((fUnit === "RL" || fUnit === "ROLO") && (sUnit === "MT" || sUnit === "M")) {
+    const metersMatch = flexDescription.match(/(\d+)\s*M\b/i);
+    const metersPerRoll = metersMatch ? parseInt(metersMatch[1], 10) : 100;
+    if (metersPerRoll > 0) {
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice * metersPerRoll),
+        convertedQty: supplierQty != null ? Math.round(supplierQty / metersPerRoll) : null
+      };
+    }
+  }
+
+  // PCT → UN or UN → PCT (pacotes): try qty ratio
+  if (supplierQty != null && supplierQty > 0 && flexQty > 0 && supplierQty !== flexQty) {
+    const ratio = flexQty / supplierQty;
+    if (ratio > 1 && Number.isInteger(ratio)) {
+      // Supplier sends in packs, Flex counts units
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice / ratio),
+        convertedQty: supplierQty * ratio
+      };
+    }
+  }
+
+  return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
+}
+
 function buildComparisonRows(
   requestedItems: RequestedItem[],
   supplierFiles: ParsedSupplierFile[]
@@ -465,10 +527,21 @@ function buildComparisonRows(
       .flatMap((file) =>
         file.quotedItems
           .filter((quote) => quoteMatchesItem(quote, item))
-          .map((quote) => ({
-            supplierName: file.supplierName,
-            quote
-          }))
+          .map((quote) => {
+            // Convert supplier price to Flex unit if units differ
+            const { convertedPrice, convertedQty } = convertSupplierPriceToFlexUnit(
+              quote.unitPrice,
+              quote.unit,
+              item.unit,
+              item.description,
+              quote.quotedQuantity,
+              item.requestedQuantity
+            );
+            return {
+              supplierName: file.supplierName,
+              quote: { ...quote, unitPrice: convertedPrice, quotedQuantity: convertedQty ?? quote.quotedQuantity }
+            };
+          })
       )
       .sort((left, right) => left.quote.unitPrice - right.quote.unitPrice);
 
@@ -618,7 +691,8 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
           description: item.description,
           unitPrice: item.unitPrice,
           totalValue: item.totalValue,
-          quotedQuantity: item.quantity
+          quotedQuantity: item.quantity,
+          unit: item.unit
         })),
         paymentTerms: extractPdfPaymentTerms(lines),
         freightTerms: extractPdfFreightTerms(lines),
