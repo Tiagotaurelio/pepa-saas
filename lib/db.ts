@@ -17,6 +17,7 @@ type SessionRow = {
   user_name: string;
   user_email: string;
   tenant_name: string;
+  role: string;
 };
 
 type PepaRoundRow = {
@@ -35,6 +36,16 @@ export type AuthSession = {
   userEmail: string;
   tenantName: string;
   expiresAt: string;
+  role: "admin" | "buyer";
+};
+
+export type UserRow = {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "buyer";
+  active: boolean;
+  createdAt: string;
 };
 
 const demoTenantId = "tenant-demo";
@@ -109,7 +120,10 @@ function initializeSqliteSchema(db: Database.Database) {
       tenant_id text not null,
       name text not null,
       email text not null unique,
-      password_hash text not null
+      password_hash text not null,
+      role text not null default 'buyer',
+      active integer not null default 1,
+      created_at text not null default ''
     );
 
     create table if not exists sessions (
@@ -125,9 +139,19 @@ function initializeSqliteSchema(db: Database.Database) {
       created_at text not null,
       mirror_file_name text not null,
       supplier_files_count integer not null,
-      snapshot_json text not null
+      snapshot_json text not null,
+      user_id text default null
     );
   `);
+
+  // Idempotent ALTER TABLE for existing databases
+  try { db.exec("alter table users add column role text not null default 'buyer'"); } catch (_) { /* column exists */ }
+  try { db.exec("alter table users add column active integer not null default 1"); } catch (_) { /* column exists */ }
+  try { db.exec("alter table users add column created_at text not null default ''"); } catch (_) { /* column exists */ }
+  try { db.exec("alter table pepa_rounds add column user_id text default null"); } catch (_) { /* column exists */ }
+
+  // Ensure demo user is always admin
+  db.exec(`update users set role = 'admin' where id = 'user-demo'`);
 }
 
 async function ensurePostgresReady() {
@@ -149,7 +173,10 @@ async function ensurePostgresReady() {
       tenant_id text not null,
       name text not null,
       email text not null unique,
-      password_hash text not null
+      password_hash text not null,
+      role text not null default 'buyer',
+      active boolean not null default true,
+      created_at text not null default ''
     );
 
     create table if not exists ${pgTable("sessions")} (
@@ -165,18 +192,28 @@ async function ensurePostgresReady() {
       created_at text not null,
       mirror_file_name text not null,
       supplier_files_count integer not null,
-      snapshot_json text not null
+      snapshot_json text not null,
+      user_id text default null
     );
   `);
+
+  // Idempotent ALTER TABLE for existing databases
+  await pool.query(`ALTER TABLE ${pgTable("users")} ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'buyer'`);
+  await pool.query(`ALTER TABLE ${pgTable("users")} ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`);
+  await pool.query(`ALTER TABLE ${pgTable("users")} ADD COLUMN IF NOT EXISTS created_at text NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE ${pgTable("pepa_rounds")} ADD COLUMN IF NOT EXISTS user_id text DEFAULT NULL`);
 
   const countResult = await pool.query<{ count: string }>(`select count(*)::text as count from ${pgTable("tenants")}`);
   if (Number(countResult.rows[0]?.count ?? "0") === 0) {
     await pool.query(`insert into ${pgTable("tenants")} (id, name) values ($1, $2)`, [demoTenantId, "PEPA Demo"]);
     await pool.query(
-      `insert into ${pgTable("users")} (id, tenant_id, name, email, password_hash) values ($1, $2, $3, $4, $5)`,
-      [demoUserId, demoTenantId, "Operador PEPA", demoEmail, hashPassword(demoPassword)]
+      `insert into ${pgTable("users")} (id, tenant_id, name, email, password_hash, role, active, created_at) values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [demoUserId, demoTenantId, "Operador PEPA", demoEmail, hashPassword(demoPassword), "admin", true, new Date().toISOString()]
     );
   }
+
+  // Ensure demo user is always admin
+  await pool.query(`update ${pgTable("users")} set role = 'admin' where id = $1`, [demoUserId]);
 
   postgresReady = true;
 }
@@ -189,8 +226,8 @@ function seedSqlite(db: Database.Database) {
 
   db.prepare("insert into tenants (id, name) values (?, ?)").run(demoTenantId, "PEPA Demo");
   db.prepare(
-    "insert into users (id, tenant_id, name, email, password_hash) values (?, ?, ?, ?, ?)"
-  ).run(demoUserId, demoTenantId, "Operador PEPA", demoEmail, hashPassword(demoPassword));
+    "insert into users (id, tenant_id, name, email, password_hash, role, active, created_at) values (?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(demoUserId, demoTenantId, "Operador PEPA", demoEmail, hashPassword(demoPassword), "admin", 1, new Date().toISOString());
 }
 
 export async function createSession(email: string, password: string): Promise<AuthSession | null> {
@@ -204,9 +241,11 @@ export async function createSession(email: string, password: string): Promise<Au
       user_email: string;
       password_hash: string;
       tenant_name: string;
+      role: string;
+      active: boolean;
     }>(
       `select users.id as user_id, users.tenant_id as tenant_id, users.name as user_name, users.email as user_email,
-              users.password_hash as password_hash, tenants.name as tenant_name
+              users.password_hash as password_hash, tenants.name as tenant_name, users.role, users.active
        from ${pgTable("users")} as users
        join ${pgTable("tenants")} as tenants on tenants.id = users.tenant_id
        where users.email = $1`,
@@ -214,6 +253,9 @@ export async function createSession(email: string, password: string): Promise<Au
     );
     const user = userResult.rows[0];
     if (!user || user.password_hash !== hashPassword(password)) {
+      return null;
+    }
+    if (!user.active) {
       return null;
     }
 
@@ -231,7 +273,8 @@ export async function createSession(email: string, password: string): Promise<Au
       userName: user.user_name,
       userEmail: user.user_email,
       tenantName: user.tenant_name,
-      expiresAt
+      expiresAt,
+      role: user.role as "admin" | "buyer"
     };
   }
 
@@ -239,7 +282,7 @@ export async function createSession(email: string, password: string): Promise<Au
   const user = db
     .prepare(
       `select users.id as user_id, users.tenant_id as tenant_id, users.name as user_name, users.email as user_email,
-              users.password_hash as password_hash, tenants.name as tenant_name
+              users.password_hash as password_hash, tenants.name as tenant_name, users.role, users.active
        from users
        join tenants on tenants.id = users.tenant_id
        where users.email = ?`
@@ -252,10 +295,15 @@ export async function createSession(email: string, password: string): Promise<Au
         user_email: string;
         password_hash: string;
         tenant_name: string;
+        role: string;
+        active: number;
       }
     | undefined;
 
   if (!user || user.password_hash !== hashPassword(password)) {
+    return null;
+  }
+  if (!user.active) {
     return null;
   }
 
@@ -275,7 +323,8 @@ export async function createSession(email: string, password: string): Promise<Au
     userName: user.user_name,
     userEmail: user.user_email,
     tenantName: user.tenant_name,
-    expiresAt
+    expiresAt,
+    role: user.role as "admin" | "buyer"
   };
 }
 
@@ -289,7 +338,7 @@ export async function getSession(token: string | undefined): Promise<AuthSession
     const pool = getPostgresPool();
     const result = await pool.query<SessionRow>(
       `select sessions.token, sessions.user_id, sessions.tenant_id, sessions.expires_at,
-              users.name as user_name, users.email as user_email, tenants.name as tenant_name
+              users.name as user_name, users.email as user_email, tenants.name as tenant_name, users.role
        from ${pgTable("sessions")} as sessions
        join ${pgTable("users")} as users on users.id = sessions.user_id
        join ${pgTable("tenants")} as tenants on tenants.id = sessions.tenant_id
@@ -312,7 +361,8 @@ export async function getSession(token: string | undefined): Promise<AuthSession
       userName: row.user_name,
       userEmail: row.user_email,
       tenantName: row.tenant_name,
-      expiresAt: row.expires_at
+      expiresAt: row.expires_at,
+      role: row.role as "admin" | "buyer"
     };
   }
 
@@ -320,7 +370,7 @@ export async function getSession(token: string | undefined): Promise<AuthSession
   const row = db
     .prepare(
       `select sessions.token, sessions.user_id, sessions.tenant_id, sessions.expires_at,
-              users.name as user_name, users.email as user_email, tenants.name as tenant_name
+              users.name as user_name, users.email as user_email, tenants.name as tenant_name, users.role
        from sessions
        join users on users.id = sessions.user_id
        join tenants on tenants.id = sessions.tenant_id
@@ -342,7 +392,8 @@ export async function getSession(token: string | undefined): Promise<AuthSession
     userName: row.user_name,
     userEmail: row.user_email,
     tenantName: row.tenant_name,
-    expiresAt: row.expires_at
+    expiresAt: row.expires_at,
+    role: row.role as "admin" | "buyer"
   };
 }
 
@@ -470,19 +521,21 @@ export async function savePepaSnapshot(params: {
   mirrorFileName: string;
   supplierFilesCount: number;
   snapshot: PepaSnapshot;
+  userId?: string;
 }) {
   if (hasPostgresConfig()) {
     await ensurePostgresReady();
     await getPostgresPool().query(
-      `insert into ${pgTable("pepa_rounds")} (id, tenant_id, created_at, mirror_file_name, supplier_files_count, snapshot_json)
-       values ($1, $2, $3, $4, $5, $6)`,
+      `insert into ${pgTable("pepa_rounds")} (id, tenant_id, created_at, mirror_file_name, supplier_files_count, snapshot_json, user_id)
+       values ($1, $2, $3, $4, $5, $6, $7)`,
       [
         params.id,
         params.tenantId,
         params.createdAt,
         params.mirrorFileName,
         params.supplierFilesCount,
-        JSON.stringify(params.snapshot)
+        JSON.stringify(params.snapshot),
+        params.userId ?? null
       ]
     );
     return;
@@ -490,15 +543,16 @@ export async function savePepaSnapshot(params: {
 
   const db = getSqlite();
   db.prepare(
-    `insert into pepa_rounds (id, tenant_id, created_at, mirror_file_name, supplier_files_count, snapshot_json)
-     values (?, ?, ?, ?, ?, ?)`
+    `insert into pepa_rounds (id, tenant_id, created_at, mirror_file_name, supplier_files_count, snapshot_json, user_id)
+     values (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     params.id,
     params.tenantId,
     params.createdAt,
     params.mirrorFileName,
     params.supplierFilesCount,
-    JSON.stringify(params.snapshot)
+    JSON.stringify(params.snapshot),
+    params.userId ?? null
   );
 }
 
@@ -554,6 +608,190 @@ export async function updateTenantName(tenantId: string, name: string): Promise<
   }
 
   getSqlite().prepare("update tenants set name = ? where id = ?").run(trimmed, tenantId);
+}
+
+export async function listUsers(tenantId: string): Promise<UserRow[]> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const result = await getPostgresPool().query<{
+      id: string;
+      name: string;
+      email: string;
+      role: string;
+      active: boolean;
+      created_at: string;
+    }>(
+      `select id, name, email, role, active, created_at
+       from ${pgTable("users")}
+       where tenant_id = $1
+       order by created_at asc`,
+      [tenantId]
+    );
+    return result.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      email: r.email,
+      role: r.role as "admin" | "buyer",
+      active: r.active,
+      createdAt: r.created_at
+    }));
+  }
+
+  const db = getSqlite();
+  const rows = db
+    .prepare(
+      `select id, name, email, role, active, created_at
+       from users
+       where tenant_id = ?
+       order by created_at asc`
+    )
+    .all(tenantId) as {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    active: number;
+    created_at: string;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: r.role as "admin" | "buyer",
+    active: r.active === 1,
+    createdAt: r.created_at
+  }));
+}
+
+export async function createUser(params: {
+  tenantId: string;
+  name: string;
+  email: string;
+  password: string;
+  role: "admin" | "buyer";
+}): Promise<UserRow> {
+  const id = randomUUID();
+  const createdAt = new Date().toISOString();
+  const passwordHash = hashPassword(params.password);
+
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    await getPostgresPool().query(
+      `insert into ${pgTable("users")} (id, tenant_id, name, email, password_hash, role, active, created_at)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [id, params.tenantId, params.name, params.email, passwordHash, params.role, true, createdAt]
+    );
+  } else {
+    const db = getSqlite();
+    db.prepare(
+      `insert into users (id, tenant_id, name, email, password_hash, role, active, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, params.tenantId, params.name, params.email, passwordHash, params.role, 1, createdAt);
+  }
+
+  return {
+    id,
+    name: params.name,
+    email: params.email,
+    role: params.role,
+    active: true,
+    createdAt
+  };
+}
+
+export async function updateUser(params: {
+  userId: string;
+  tenantId: string;
+  name?: string;
+  email?: string;
+  password?: string;
+  role?: "admin" | "buyer";
+}): Promise<void> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    let idx = 1;
+
+    if (params.name !== undefined) {
+      sets.push(`name = $${idx++}`);
+      values.push(params.name);
+    }
+    if (params.email !== undefined) {
+      sets.push(`email = $${idx++}`);
+      values.push(params.email);
+    }
+    if (params.password !== undefined) {
+      sets.push(`password_hash = $${idx++}`);
+      values.push(hashPassword(params.password));
+    }
+    if (params.role !== undefined) {
+      sets.push(`role = $${idx++}`);
+      values.push(params.role);
+    }
+
+    if (sets.length === 0) return;
+
+    values.push(params.userId, params.tenantId);
+    await pool.query(
+      `update ${pgTable("users")} set ${sets.join(", ")} where id = $${idx++} and tenant_id = $${idx}`,
+      values
+    );
+    return;
+  }
+
+  const db = getSqlite();
+  const sets: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.name !== undefined) {
+    sets.push("name = ?");
+    values.push(params.name);
+  }
+  if (params.email !== undefined) {
+    sets.push("email = ?");
+    values.push(params.email);
+  }
+  if (params.password !== undefined) {
+    sets.push("password_hash = ?");
+    values.push(hashPassword(params.password));
+  }
+  if (params.role !== undefined) {
+    sets.push("role = ?");
+    values.push(params.role);
+  }
+
+  if (sets.length === 0) return;
+
+  values.push(params.userId, params.tenantId);
+  db.prepare(`update users set ${sets.join(", ")} where id = ? and tenant_id = ?`).run(...values);
+}
+
+export async function toggleUserActive(params: {
+  userId: string;
+  tenantId: string;
+}): Promise<{ active: boolean }> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    const result = await pool.query<{ active: boolean }>(
+      `update ${pgTable("users")} set active = not active where id = $1 and tenant_id = $2 returning active`,
+      [params.userId, params.tenantId]
+    );
+    return { active: result.rows[0]?.active ?? true };
+  }
+
+  const db = getSqlite();
+  db.prepare("update users set active = case when active = 1 then 0 else 1 end where id = ? and tenant_id = ?").run(
+    params.userId,
+    params.tenantId
+  );
+  const row = db.prepare("select active from users where id = ? and tenant_id = ?").get(params.userId, params.tenantId) as
+    | { active: number }
+    | undefined;
+  return { active: row?.active === 1 };
 }
 
 function hashPassword(value: string) {
