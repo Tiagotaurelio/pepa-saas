@@ -44,6 +44,19 @@ function getDateRange(days: number): { start: string; end: string } {
 }
 
 export default function PainelPerformancePage() {
+  const [authorized, setAuthorized] = useState<boolean | null>(null);
+
+  // Check admin role on mount
+  useEffect(() => {
+    fetch("/api/auth/session").then(r => r.json()).then((d: { session?: { role?: string } }) => {
+      if (d.session?.role !== "admin") {
+        window.location.href = "/cotacoes-pepa";
+      } else {
+        setAuthorized(true);
+      }
+    }).catch(() => { window.location.href = "/login"; });
+  }, []);
+
   const [activeDays, setActiveDays] = useState<number>(30);
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -110,6 +123,10 @@ export default function PainelPerformancePage() {
     if (type === "start") setCustomStart(value);
     else setCustomEnd(value);
     setActiveDays(-1);
+  }
+
+  if (!authorized) {
+    return <div className="flex items-center justify-center py-20 text-sm text-slate-400">Carregando...</div>;
   }
 
   return (

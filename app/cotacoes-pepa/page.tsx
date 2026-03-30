@@ -31,6 +31,8 @@ export default function CotacoesPepaPage() {
   const [locallyAcceptedDesc, setLocallyAcceptedDesc] = useState<Set<string>>(new Set());
   const [editingDescKey, setEditingDescKey] = useState<string | null>(null);
   const [adjustedDesc, setAdjustedDesc] = useState("");
+  const [divergenceFilter, setDivergenceFilter] = useState<"all" | "price" | "quantity" | "description">("all");
+  const [isAcceptingAll, setIsAcceptingAll] = useState(false);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -144,7 +146,15 @@ export default function CotacoesPepaPage() {
     setSelectedRows((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   }
 
-  const visibleRows = snapshot.comparisonRows.filter((row) => !showOnlyDivergences || hasDivergence(row));
+  const visibleRows = snapshot.comparisonRows.filter((row) => {
+    if (!showOnlyDivergences) return true;
+    if (!hasDivergence(row)) return false;
+    if (divergenceFilter === "all") return true;
+    if (divergenceFilter === "price") return hasPriceDivergence(row);
+    if (divergenceFilter === "quantity") return hasQuantityDivergence(row);
+    if (divergenceFilter === "description") return row.descriptionMismatch === true;
+    return true;
+  });
   const singleSupplier = snapshot.suppliers.length === 1 ? snapshot.suppliers[0].supplierName : null;
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((r) => selectedRows.has(`${r.sku}-${r.description}`));
   const selectedRowsData = snapshot.comparisonRows.filter((row) => {
@@ -262,16 +272,68 @@ export default function CotacoesPepaPage() {
           </div>
           <div className="flex flex-wrap items-center gap-3">
             {snapshot.comparisonRows.some(hasDivergence) && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { setShowOnlyDivergences((prev) => !prev); setDivergenceFilter("all"); }}
+                  className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                    showOnlyDivergences ? "bg-red-600 text-white" : "bg-red-50 text-red-700 hover:bg-red-100"
+                  }`}
+                >
+                  {showOnlyDivergences
+                    ? `Mostrando ${visibleRows.length} divergência(s)`
+                    : `Ver só divergências (${snapshot.comparisonRows.filter(hasDivergence).length})`}
+                </button>
+                {showOnlyDivergences && (
+                  <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+                    {([
+                      { key: "all" as const, label: "Todas" },
+                      { key: "price" as const, label: "Preço" },
+                      { key: "quantity" as const, label: "Quantidade" },
+                      { key: "description" as const, label: "Descrição" }
+                    ]).map((f) => (
+                      <button key={f.key} type="button" onClick={() => setDivergenceFilter(f.key)}
+                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                          divergenceFilter === f.key ? "bg-white shadow-sm text-brand-ink" : "text-slate-500 hover:text-brand-ink"
+                        }`}>
+                        {f.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+            {selectedRows.size > 0 && !isClosedRound && (
               <button
                 type="button"
-                onClick={() => setShowOnlyDivergences((prev) => !prev)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
-                  showOnlyDivergences ? "bg-red-600 text-white" : "bg-red-50 text-red-700 hover:bg-red-100"
-                }`}
+                disabled={isAcceptingAll}
+                onClick={async () => {
+                  if (!snapshot.latestRound) return;
+                  setIsAcceptingAll(true);
+                  const rowsToAccept = snapshot.comparisonRows.filter((row) =>
+                    selectedRows.has(`${row.sku}-${row.description}`) && row.bestSupplier && row.selectionMode !== "manual"
+                  );
+                  for (const row of rowsToAccept) {
+                    await fetch("/api/pepa/selection", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      credentials: "same-origin",
+                      body: JSON.stringify({
+                        roundId: snapshot.latestRound.id,
+                        sku: row.sku,
+                        description: row.description,
+                        supplierName: row.bestSupplier,
+                        unitPrice: row.bestUnitPrice
+                      })
+                    });
+                  }
+                  setSelectedRows(new Set());
+                  setIsAcceptingAll(false);
+                  window.dispatchEvent(new Event("pepa-store-updated"));
+                }}
+                className="rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
               >
-                {showOnlyDivergences
-                  ? `Mostrando ${snapshot.comparisonRows.filter(hasDivergence).length} divergência(s)`
-                  : `Ver só divergências (${snapshot.comparisonRows.filter(hasDivergence).length})`}
+                {isAcceptingAll ? "Aceitando..." : `Aceitar ${selectedRows.size} selecionado(s)`}
               </button>
             )}
           </div>
