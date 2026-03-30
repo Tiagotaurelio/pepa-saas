@@ -388,6 +388,7 @@ function tryBlockExtraction(lines: string[]): ExtractedPdfItem[] {
     const sku = startMatch.sku;
     const afterCode = line.slice(startMatch.descStart);
     const descParts: string[] = [afterCode.trim()];
+    let supplierRef: string | undefined;
 
     i++;
 
@@ -424,11 +425,19 @@ function tryBlockExtraction(lines: string[]): ExtractedPdfItem[] {
       // Check if next item starts (means we missed the unit+date)
       if (matchItemStart(cur)) break;
 
-      // Skip markers like "*", "(ICX)", "(NCX)", "Ref:", page headers
+      // Skip markers like "*", "(ICX)", "(NCX)", page headers
       if (/^(\*|SeqC[oó]d)/.test(cur)) { i++; continue; }
 
-      // Accumulate description (skip ref lines like "06733 (i)")
-      if (!/^\d{4,6}\s*\(/.test(cur) && cur.length > 1) {
+      // Capture cross-reference code from "Ref:" lines like "04504 (i)" or "06733 (i)"
+      const refCodeMatch = cur.match(/^(\d{4,6})\s*\(/);
+      if (refCodeMatch) {
+        supplierRef = refCodeMatch[1];
+        i++;
+        continue;
+      }
+
+      // Accumulate description (strip trailing "Ref:" marker)
+      if (cur.length > 1) {
         descParts.push(cur);
       }
       i++;
@@ -483,6 +492,7 @@ function tryBlockExtraction(lines: string[]): ExtractedPdfItem[] {
       unitPrice,
       totalValue: null,
       ipiPercent: null,
+      supplierRef,
     });
   }
 

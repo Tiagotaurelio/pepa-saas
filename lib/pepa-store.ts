@@ -60,6 +60,7 @@ type SupplierQuoteRow = {
   totalValue: number | null;
   quotedQuantity?: number;
   unit?: string;
+  alternativeRef?: string;
 };
 
 type ParsedSupplierFile = {
@@ -769,7 +770,8 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
           unitPrice: item.unitPrice,
           totalValue: item.totalValue,
           quotedQuantity: item.quantity,
-          unit: item.unit
+          unit: item.unit,
+          alternativeRef: item.supplierRef,
         })),
         paymentTerms: extractPdfPaymentTerms(lines),
         freightTerms: extractPdfFreightTerms(lines),
@@ -1245,7 +1247,74 @@ function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
   // 3. Descrição normalizada
   const quoteDescription = normalizeComparable(quote.description);
   const itemDescription = normalizeComparable(item.description);
-  return Boolean(quoteDescription && itemDescription && quoteDescription === itemDescription);
+  if (quoteDescription && itemDescription && quoteDescription === itemDescription) return true;
+
+  // 4. alternativeRef from supplier "Ref:" line matches Flex supplierRef
+  if (quote.alternativeRef && item.supplierRef) {
+    const altRef = normalizeComparable(quote.alternativeRef);
+    const itemRef = normalizeComparable(item.supplierRef);
+    if (altRef && itemRef && altRef === itemRef) return true;
+    // Also try with prefix stripping
+    if (altRef && itemRef) {
+      if (itemRef.endsWith(altRef) || altRef.endsWith(itemRef)) return true;
+      for (const prefix of ["w", "wb", "wbb"]) {
+        if (itemRef.startsWith(prefix) && itemRef.slice(prefix.length) === altRef) return true;
+        if (altRef.startsWith(prefix) && altRef.slice(prefix.length) === itemRef) return true;
+      }
+    }
+  }
+
+  // 5. Dimension-based matching: match by product dimensions + product type keyword
+  if (quoteDescription && itemDescription) {
+    const dimMatch = matchByDimension(quote.description, item.description);
+    if (dimMatch) return true;
+  }
+
+  return false;
+}
+
+/** Extract dimension pattern like "3.0x22" from a description, normalized */
+function extractDimension(desc: string): string | null {
+  const m = desc.match(/(\d+[.,]?\d*)\s*[xX]\s*(\d+)/);
+  if (!m) return null;
+  // Normalize: replace comma with dot, lowercase
+  const left = m[1].replace(",", ".");
+  const right = m[2];
+  return `${left}x${right}`;
+}
+
+/** Product type keywords for dimension matching safety */
+const PRODUCT_TYPE_KEYWORDS: string[][] = [
+  ["parafuso", "pf"],
+  ["chumbador", "cbj"],
+  ["arruela"],
+  ["barra", "roscada"],
+  ["porca"],
+];
+
+function matchByDimension(descA: string, descB: string): boolean {
+  const dimA = extractDimension(descA);
+  const dimB = extractDimension(descB);
+  if (!dimA || !dimB || dimA !== dimB) return false;
+
+  // Both descriptions must share at least one product type keyword
+  const lowerA = descA.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const lowerB = descB.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  for (const group of PRODUCT_TYPE_KEYWORDS) {
+    const aHas = group.some((kw) => {
+      // Use word boundary-ish check: keyword appears as standalone token
+      const re = new RegExp(`(?:^|[\\s/])${kw}(?:[\\s/]|$)`);
+      return re.test(lowerA);
+    });
+    const bHas = group.some((kw) => {
+      const re = new RegExp(`(?:^|[\\s/])${kw}(?:[\\s/]|$)`);
+      return re.test(lowerB);
+    });
+    if (aHas && bHas) return true;
+  }
+
+  return false;
 }
 
 function roundCurrency(value: number) {
