@@ -45,9 +45,9 @@ export default function ConfiguracoesPage() {
       fetch("/api/auth/session").then((r) => r.json()),
       fetch("/api/pepa/settings").then((r) => r.json())
     ])
-      .then(([sessionData, settingsData]: [{ userId?: string; role?: string }, { name?: string }]) => {
-        setRole((sessionData.role as "admin" | "buyer") ?? "buyer");
-        setCurrentUserId(sessionData.userId ?? null);
+      .then(([sessionData, settingsData]: [{ session?: { userId?: string; role?: string } }, { name?: string }]) => {
+        setRole((sessionData.session?.role as "admin" | "buyer") ?? "buyer");
+        setCurrentUserId(sessionData.session?.userId ?? null);
         setCompanyName(settingsData.name ?? "");
         setLoading(false);
       })
