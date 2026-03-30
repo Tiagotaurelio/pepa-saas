@@ -391,10 +391,9 @@ export default function CotacoesPepaPage() {
                   const anyDivergence = hasAnyRawDivergence && row.selectionMode !== "manual";
                   const rowBg = anyDivergence ? "bg-red-50" : "bg-brand-surface";
                   const rowStyle = { backgroundColor: anyDivergence ? "#fef2f2" : "#f5f7fa" };
-                  // Quando há fornecedor único e o item não foi extraído pelo parser,
-                  // usa o preço do Flex como preço cotado (fornecedor confirmado pelo usuário)
-                  const effectiveUnitPrice = row.bestUnitPrice ?? (singleSupplier ? row.baseUnitPrice : null);
-                  const effectiveTotal = row.bestTotal ?? (singleSupplier && row.baseUnitPrice != null ? roundDisplay(row.baseUnitPrice * row.requestedQuantity) : null);
+                  // Preço cotado deve vir EXCLUSIVAMENTE do fornecedor — nunca copiar o preço do Flex
+                  const effectiveUnitPrice = row.bestUnitPrice;
+                  const effectiveTotal = row.bestTotal;
                   const hasMultipleOffers = (row.offers?.length ?? 0) > 1;
                   const isExpanded = expandedOffersKey === rowKey;
 
