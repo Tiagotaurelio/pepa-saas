@@ -22,17 +22,83 @@ function parseQuantity(raw: string): number {
  * The date (DD/MM/YYYY) is the reliable anchor separating description from prices.
  */
 export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
-  // Try line-mode first on raw lines
+  // Try line-mode on raw lines
   const lineItems = parseFlexLineMode(lines);
   if (lineItems.length > 0) return lineItems;
 
-  // Try line-mode on OCR-cleaned lines (remove | ] ! / artifacts from table borders)
+  // Try after merging multi-line items (some Flex PDFs split items across 2-3 lines)
+  const mergedLines = mergeMultiLineItems(lines);
+  const mergedItems = parseFlexLineMode(mergedLines);
+  if (mergedItems.length > 0) return mergedItems;
+
+  // Try with OCR-cleaned lines
   const cleanedLines = lines.map(cleanOcrLine);
-  const ocrLineItems = parseFlexLineMode(cleanedLines);
+  const cleanedMerged = mergeMultiLineItems(cleanedLines);
+  const ocrLineItems = parseFlexLineMode(cleanedMerged);
   if (ocrLineItems.length > 0) return ocrLineItems;
 
   // Fallback: cell-mode (one value per line, blocks of 10)
   return parseFlexCellMode(lines);
+}
+
+/**
+ * Merge multi-line Flex items into single lines.
+ * Some Flex PDFs split items across 2-3 lines:
+ *   Line 1: "20 5574"  or  "20 5574 BOBINA CABO FLEXIVEL..."
+ *   Line 2: "BOBINA CABO FLEXIVEL HEPR 1KV..."  (continuation)
+ *   Line 3: "WB1025E-VD MT 1.000 05/03/2026 7,18 7180.00 0.00"  (ref + data)
+ *
+ * Strategy: accumulate lines until we find one containing a date (DD/MM/YYYY),
+ * which marks the end of an item. Then emit the merged line.
+ */
+function mergeMultiLineItems(lines: string[]): string[] {
+  const result: string[] = [];
+  let buffer: string[] = [];
+  let inItemBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Check if this line starts a new item (seq + sku)
+    const startsWithSeq = /^\d{1,3}\s+\d{1,6}\b/.test(trimmed);
+    // Check if this line contains a date (marks end of item data)
+    const hasDate = DATE_RE.test(trimmed);
+
+    if (startsWithSeq) {
+      // If we had a previous buffer without a date, flush it as-is
+      if (buffer.length > 0) {
+        result.push(buffer.join(" "));
+      }
+      buffer = [trimmed];
+      inItemBlock = true;
+
+      if (hasDate) {
+        // Complete item on single line
+        result.push(buffer.join(" "));
+        buffer = [];
+        inItemBlock = false;
+      }
+    } else if (inItemBlock) {
+      buffer.push(trimmed);
+      if (hasDate) {
+        // Date found — this completes the item
+        result.push(buffer.join(" "));
+        buffer = [];
+        inItemBlock = false;
+      }
+    } else {
+      // Not in an item block, pass through (headers, metadata, etc.)
+      result.push(trimmed);
+    }
+  }
+
+  // Flush remaining buffer
+  if (buffer.length > 0) {
+    result.push(buffer.join(" "));
+  }
+
+  return result;
 }
 
 /**
