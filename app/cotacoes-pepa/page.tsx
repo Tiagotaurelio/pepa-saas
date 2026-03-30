@@ -376,8 +376,7 @@ export default function CotacoesPepaPage() {
                 </tr>
               )}
               <AnimatePresence initial={false}>
-              {snapshot.comparisonRows
-                .filter((row) => !showOnlyDivergences || hasDivergence(row))
+              {visibleRows
                 .flatMap((row) => {
                   const priceDivergence = hasPriceDivergence(row);
                   // Usa a offer do fornecedor selecionado para garantir qtd correta
