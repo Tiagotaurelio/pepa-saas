@@ -149,7 +149,7 @@ describe("PEPA API integration", () => {
     expect(snapshotPayload.snapshot.latestRound.id).toBe(roundId);
     expect(snapshotPayload.snapshot.diagnostics.parsedSuppliers).toBe(2);
 
-    const historyResponse = await historyRoute();
+    const historyResponse = await historyRoute(new Request("http://localhost/api/pepa/history") as any);
     expect(historyResponse.status).toBe(200);
     const historyPayload = (await historyResponse.json()) as {
       rounds: Array<{ id: string; coverageRate: number; status: string }>;

@@ -6,13 +6,13 @@ import { readPepaRounds, readPepaRoundsDetailed } from "@/lib/pepa-store";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export async function GET(request?: NextRequest) {
+export async function GET(request: NextRequest) {
   const session = await getCurrentSession();
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const detailed = request?.url ? new URL(request.url).searchParams.get("detailed") === "true" : false;
+  const detailed = new URL(request.url).searchParams.get("detailed") === "true";
 
   if (detailed) {
     const rounds = await readPepaRoundsDetailed(session.tenantId);
