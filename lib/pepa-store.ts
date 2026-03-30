@@ -1065,19 +1065,33 @@ function classifyUploadFile(file: UploadFileInput): FileCapability {
 }
 
 function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
-  // Chave primária: Ref.Fornecedor (Flex) = COD (fornecedor)
+  const quoteSku = normalizeComparable(quote.sku);
+
+  // 1. Ref.Fornecedor (Flex) = COD (fornecedor) — exact match
   if (item.supplierRef) {
-    const quoteRef = normalizeComparable(quote.sku);
     const itemRef = normalizeComparable(item.supplierRef);
-    if (quoteRef && itemRef && quoteRef === itemRef) return true;
+    if (quoteSku && itemRef && quoteSku === itemRef) return true;
+
+    // Flex often prefixes supplier codes with "W" or "WB" etc.
+    // Try: ref ends with supplier SKU, or supplier SKU ends with ref
+    if (quoteSku && itemRef) {
+      if (itemRef.endsWith(quoteSku) || quoteSku.endsWith(itemRef)) return true;
+      // Try stripping common prefixes from Flex ref: W, WB, WBB
+      for (const prefix of ["w", "wb", "wbb"]) {
+        if (itemRef.startsWith(prefix) && itemRef.slice(prefix.length) === quoteSku) return true;
+      }
+      // Try stripping common prefixes from supplier SKU
+      for (const prefix of ["w", "wb", "wbb"]) {
+        if (quoteSku.startsWith(prefix) && quoteSku.slice(prefix.length) === itemRef) return true;
+      }
+    }
   }
 
-  // Fallback: SKU direto
-  const quoteSku = normalizeComparable(quote.sku);
+  // 2. SKU direto (PEPA code = supplier code)
   const itemSku = normalizeComparable(item.sku);
   if (quoteSku && itemSku && quoteSku === itemSku) return true;
 
-  // Fallback: descrição
+  // 3. Descrição normalizada
   const quoteDescription = normalizeComparable(quote.description);
   const itemDescription = normalizeComparable(item.description);
   return Boolean(quoteDescription && itemDescription && quoteDescription === itemDescription);
