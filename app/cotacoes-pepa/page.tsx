@@ -29,6 +29,8 @@ export default function CotacoesPepaPage() {
   const [adjustedQty, setAdjustedQty] = useState("");
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [locallyAcceptedDesc, setLocallyAcceptedDesc] = useState<Set<string>>(new Set());
+  const [editingDescKey, setEditingDescKey] = useState<string | null>(null);
+  const [adjustedDesc, setAdjustedDesc] = useState("");
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -456,25 +458,63 @@ export default function CotacoesPepaPage() {
                             </span>
                           )}
                           {effectiveDescMismatch && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
-                            <div className="mt-1">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!priceDivergence && !qtyDivergence) {
-                                    // Única divergência era descrição — salva e resolve o item
-                                    // Para itens sem match no parser (bestSupplier=null), o store aceita null
-                                    // e define selectionMode=manual via caminho específico
-                                    void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined);
-                                  } else {
-                                    // Ainda há outras divergências — aceita descrição localmente e mantém o item na tela
-                                    setLocallyAcceptedDesc((prev) => { const next = new Set(prev); next.add(rowKey); return next; });
-                                  }
-                                }}
-                                disabled={savingRowKey === rowKey}
-                                className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
-                              >
-                                Aceitar descrição
-                              </button>
+                            <div className="mt-1 flex flex-col gap-1">
+                              {editingDescKey === rowKey ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="text"
+                                    value={adjustedDesc}
+                                    onChange={(e) => setAdjustedDesc(e.target.value)}
+                                    className="w-48 rounded-lg border border-slate-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-blue"
+                                    placeholder="Nova descrição"
+                                    autoFocus
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (adjustedDesc.trim()) {
+                                        setLocallyAcceptedDesc((prev) => { const next = new Set(prev); next.add(rowKey); return next; });
+                                        setEditingDescKey(null);
+                                        setAdjustedDesc("");
+                                      }
+                                    }}
+                                    className="rounded-lg bg-brand-blue px-2 py-1 text-xs font-semibold text-white"
+                                  >
+                                    Salvar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingDescKey(null); setAdjustedDesc(""); }}
+                                    className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-600"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!priceDivergence && !qtyDivergence) {
+                                        void saveSelection(row.sku, row.description, row.bestSupplier, row.bestUnitPrice, undefined);
+                                      } else {
+                                        setLocallyAcceptedDesc((prev) => { const next = new Set(prev); next.add(rowKey); return next; });
+                                      }
+                                    }}
+                                    disabled={savingRowKey === rowKey}
+                                    className="inline-flex w-fit rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700 hover:bg-green-200 disabled:opacity-50"
+                                  >
+                                    Aceitar descrição
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setEditingDescKey(rowKey); setAdjustedDesc(row.supplierDescription ?? row.description); }}
+                                    className="inline-flex w-fit rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-700 hover:bg-amber-200"
+                                  >
+                                    Ajustar descrição
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           )}
                           {priceDivergence && snapshot.latestRound && !isClosedRound && row.selectionMode !== "manual" && (
