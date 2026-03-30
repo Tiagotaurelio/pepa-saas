@@ -22,16 +22,17 @@ function parseQuantity(raw: string): number {
  * The date (DD/MM/YYYY) is the reliable anchor separating description from prices.
  */
 export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
-  // Try line-mode on raw lines
-  const lineItems = parseFlexLineMode(lines);
-  if (lineItems.length > 0) return lineItems;
-
-  // Try after merging multi-line items (some Flex PDFs split items across 2-3 lines)
+  // Always try merge first — Flex PDFs often split items across multiple lines.
+  // Merging never hurts single-line items (they pass through unchanged).
   const mergedLines = mergeMultiLineItems(lines);
   const mergedItems = parseFlexLineMode(mergedLines);
   if (mergedItems.length > 0) return mergedItems;
 
-  // Try with OCR-cleaned lines
+  // Try raw lines without merge (single-line format)
+  const lineItems = parseFlexLineMode(lines);
+  if (lineItems.length > 0) return lineItems;
+
+  // Try with OCR-cleaned lines + merge
   const cleanedLines = lines.map(cleanOcrLine);
   const cleanedMerged = mergeMultiLineItems(cleanedLines);
   const ocrLineItems = parseFlexLineMode(cleanedMerged);
