@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
 
   const session = await signIn(body.email, body.password);
   if (!session) {
-    return NextResponse.json({ error: "Email ou senha invalidos." }, { status: 401 });
+    return NextResponse.json({ error: "Email ou senha invalidos. Caso sua conta esteja desativada, contate o administrador." }, { status: 401 });
   }
 
   const cookieStore = await cookies();

@@ -15,7 +15,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html lang="pt-BR">
       <body>
-        <AppShell tenantName={session?.tenantName ?? null} userName={session?.userName ?? null}>
+        <AppShell
+          tenantName={session?.tenantName ?? null}
+          userName={session?.userName ?? null}
+          userRole={session?.role ?? null}
+        >
           {children}
         </AppShell>
       </body>

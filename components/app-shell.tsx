@@ -10,12 +10,16 @@ type AppShellProps = {
   children: ReactNode;
   tenantName: string | null;
   userName: string | null;
+  userRole: "admin" | "buyer" | null;
 };
 
-export function AppShell({ children, tenantName, userName }: AppShellProps) {
+export function AppShell({ children, tenantName, userName, userRole }: AppShellProps) {
   const pathname = usePathname();
   const hideChrome = pathname === "/login";
   const [displayTenantName, setDisplayTenantName] = useState(tenantName);
+  const visibleNavigation = navigation.filter(
+    (item) => !item.adminOnly || userRole === "admin"
+  );
 
   useEffect(() => {
     if (tenantName) setDisplayTenantName(tenantName);
@@ -56,7 +60,7 @@ export function AppShell({ children, tenantName, userName }: AppShellProps) {
           </div>
 
           <nav className="grid gap-2">
-            {navigation.map((item) => {
+            {visibleNavigation.map((item) => {
               const isActive =
                 pathname === item.href ||
                 (item.href !== "/" && pathname.startsWith(`${item.href}/`));
