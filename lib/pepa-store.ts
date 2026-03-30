@@ -128,6 +128,81 @@ export async function readPepaRounds(tenantId: string): Promise<PepaUploadRoundS
   });
 }
 
+export type RoundDetailedSummary = {
+  id: string;
+  createdAt: string;
+  mirrorFileName: string;
+  supplierNames: string[];
+  requestedItemsCount: number;
+  quotedItems: number;
+  pendingDivergences: number;
+  resolvedDivergences: number;
+  totalSavings: number;
+  detailedStatus: "open" | "validating" | "validated" | "closed";
+  status: "open" | "closed";
+};
+
+export async function readPepaRoundsDetailed(tenantId: string): Promise<RoundDetailedSummary[]> {
+  return (await listPepaRounds(tenantId)).map((row) => {
+    const snapshot = JSON.parse(row.snapshot_json) as PepaSnapshot;
+    const rows = snapshot.comparisonRows ?? [];
+    const rawStatus = snapshot.latestRound?.status ?? "open";
+
+    // Count divergences
+    let pendingDivergences = 0;
+    let resolvedDivergences = 0;
+    let totalSavings = 0;
+
+    for (const r of rows) {
+      const hasPriceDiff = r.baseUnitPrice != null && r.bestUnitPrice != null && r.baseUnitPrice !== r.bestUnitPrice;
+      const hasQtyDiff = r.offers && r.offers.length > 0 && r.offers[0].quotedQuantity != null && r.offers[0].quotedQuantity !== r.requestedQuantity;
+      const hasDescDiff = r.descriptionMismatch === true;
+      const hasDivergence = hasPriceDiff || hasQtyDiff || hasDescDiff;
+
+      if (hasDivergence) {
+        if (r.selectionMode === "manual") {
+          resolvedDivergences++;
+        } else {
+          pendingDivergences++;
+        }
+      }
+
+      // Calculate savings (positive = PEPA saved money)
+      if (r.baseUnitPrice != null && r.bestUnitPrice != null && r.bestUnitPrice < r.baseUnitPrice) {
+        totalSavings += (r.baseUnitPrice - r.bestUnitPrice) * r.requestedQuantity;
+      }
+    }
+
+    // Determine detailed status
+    let detailedStatus: "open" | "validating" | "validated" | "closed";
+    if (rawStatus === "closed") {
+      detailedStatus = "closed";
+    } else if (pendingDivergences > 0) {
+      detailedStatus = "validating";
+    } else if (resolvedDivergences > 0 || rows.length > 0) {
+      detailedStatus = "validated";
+    } else {
+      detailedStatus = "open";
+    }
+
+    const supplierNames = (snapshot.suppliers ?? []).map((s) => s.supplierName);
+
+    return {
+      id: row.id,
+      createdAt: row.created_at,
+      mirrorFileName: row.mirror_file_name,
+      supplierNames,
+      requestedItemsCount: snapshot.latestRound?.requestedItemsCount ?? snapshot.totals?.requestedItems ?? 0,
+      quotedItems: snapshot.totals?.quotedItems ?? 0,
+      pendingDivergences,
+      resolvedDivergences,
+      totalSavings: Math.round(totalSavings * 100) / 100,
+      detailedStatus,
+      status: rawStatus
+    };
+  });
+}
+
 export async function updateComparisonSelection(params: {
   tenantId: string;
   roundId: string;
