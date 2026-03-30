@@ -45,6 +45,7 @@ export async function POST(request: NextRequest) {
 
   const snapshot = await persistPepaUploadRound({
     tenantId: session.tenantId,
+    userId: session.userId,
     mirrorFile: {
       name: mirrorFile.name,
       type: mirrorFile.type,

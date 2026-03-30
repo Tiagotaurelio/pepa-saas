@@ -291,6 +291,7 @@ export async function updateRoundStatus(params: {
 
 export async function persistPepaUploadRound(params: {
   tenantId: string;
+  userId?: string;
   mirrorFile: UploadFileInput;
   supplierFiles: UploadFileInput[];
 }): Promise<PepaSnapshot> {
@@ -355,7 +356,8 @@ export async function persistPepaUploadRound(params: {
     createdAt,
     mirrorFileName: params.mirrorFile.name,
     supplierFilesCount: params.supplierFiles.length,
-    snapshot
+    snapshot,
+    userId: params.userId
   });
 
   return snapshot;

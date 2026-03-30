@@ -794,6 +794,80 @@ export async function toggleUserActive(params: {
   return { active: row?.active === 1 };
 }
 
+export type DashboardRoundRow = {
+  id: string;
+  createdAt: string;
+  userId: string | null;
+  userName: string | null;
+  snapshotJson: string;
+};
+
+export async function listPepaRoundsForDashboard(
+  tenantId: string,
+  startDate: string,
+  endDate: string,
+  userId?: string
+): Promise<DashboardRoundRow[]> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    const userFilter = userId ? ` AND r.user_id = $4` : "";
+    const params = userId
+      ? [tenantId, startDate, endDate, userId]
+      : [tenantId, startDate, endDate];
+    const result = await pool.query<{
+      id: string;
+      created_at: string;
+      user_id: string | null;
+      user_name: string | null;
+      snapshot_json: string;
+    }>(
+      `SELECT r.id, r.created_at, r.user_id, u.name as user_name, r.snapshot_json
+       FROM ${pgTable("pepa_rounds")} r
+       LEFT JOIN ${pgTable("users")} u ON r.user_id = u.id
+       WHERE r.tenant_id = $1 AND r.created_at >= $2 AND r.created_at <= $3${userFilter}
+       ORDER BY r.created_at ASC`,
+      params
+    );
+    return result.rows.map((r) => ({
+      id: r.id,
+      createdAt: r.created_at,
+      userId: r.user_id,
+      userName: r.user_name,
+      snapshotJson: r.snapshot_json
+    }));
+  }
+
+  const db = getSqlite();
+  const userFilter = userId ? ` AND r.user_id = ?` : "";
+  const params = userId
+    ? [tenantId, startDate, endDate, userId]
+    : [tenantId, startDate, endDate];
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.created_at, r.user_id, u.name as user_name, r.snapshot_json
+       FROM pepa_rounds r
+       LEFT JOIN users u ON r.user_id = u.id
+       WHERE r.tenant_id = ? AND r.created_at >= ? AND r.created_at <= ?${userFilter}
+       ORDER BY r.created_at ASC`
+    )
+    .all(...params) as {
+    id: string;
+    created_at: string;
+    user_id: string | null;
+    user_name: string | null;
+    snapshot_json: string;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    userId: r.user_id,
+    userName: r.user_name,
+    snapshotJson: r.snapshot_json
+  }));
+}
+
 function hashPassword(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
