@@ -339,10 +339,152 @@ export function parseGenericSupplierPdf(lines: string[]): ExtractedPdfItem[] {
   const headerResult = tryHeaderBasedExtraction(lines);
   if (headerResult.length > 0) return headerResult;
 
-  // Strategy 2: Concatenated format
+  // Strategy 2: Concatenated format (Corfio-style: qty+unit+sku glued)
   const concatResult = tryConcatenatedExtraction(lines);
   if (concatResult.length > 0) return concatResult;
 
-  // Strategy 3: Token-based
+  // Strategy 3: Multi-line block format (Jomarca-style: seq+code+desc across multiple lines)
+  const blockResult = tryBlockExtraction(lines);
+  if (blockResult.length > 0) return blockResult;
+
+  // Strategy 4: Token-based
   return tryTokenBasedExtraction(lines);
+}
+
+// ---------- Strategy 3: Multi-line block extraction ----------
+// For supplier PDFs where each item spans multiple lines:
+//   Line 1: {seq}{code}{description start...}
+//   Line 2+: description continuation, "*", "(ICX)" etc.
+//   Unit+date line: {UN|CT|KG|CX}{DD/MM/YY} (glued)
+//   Optional: packaging type (CX, SACO, BR)
+//   Numbers line: {price},{decimal}{qty},{decimal}...
+
+const UNIT_DATE_RE = /^(UN|CT|KG|CX|KIT|MT|RL|PC|PCT|M|L)\s*(\d{2}\/\d{2}\/\d{2,4})/i;
+// Match seq+code at start of line. Prefer longer code (5-6 digits) over longer seq.
+function matchItemStart(line: string): { seq: number; sku: string; descStart: number } | null {
+  // Try 1-digit seq + 5-6 digit code first (most common)
+  const m1 = line.match(/^(\d)(\d{5,6})([A-ZÀ-ÿ])/);
+  if (m1) return { seq: parseInt(m1[1], 10), sku: m1[2], descStart: m1[1].length + m1[2].length };
+  // Then 2-digit seq + 4-6 digit code
+  const m2 = line.match(/^(\d{2})(\d{4,6})([A-ZÀ-ÿ])/);
+  if (m2) return { seq: parseInt(m2[1], 10), sku: m2[2], descStart: m2[1].length + m2[2].length };
+  return null;
+}
+
+function tryBlockExtraction(lines: string[]): ExtractedPdfItem[] {
+  const items: ExtractedPdfItem[] = [];
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+
+    // Skip headers, footers, metadata
+    if (shouldSkipLine(line) || looksLikeHeader(line)) { i++; continue; }
+
+    // Look for item start: seq + code + description start
+    const startMatch = matchItemStart(line);
+    if (!startMatch) { i++; continue; }
+
+    const sku = startMatch.sku;
+    const afterCode = line.slice(startMatch.descStart);
+    const descParts: string[] = [afterCode.trim()];
+
+    i++;
+
+    // Collect description continuation + find unit+date line
+    let unit = "UN";
+    let foundUnitDate = false;
+
+    while (i < lines.length) {
+      const cur = lines[i].trim();
+
+      // Check if this line has unit+date
+      const unitDateMatch = cur.match(UNIT_DATE_RE);
+      if (unitDateMatch) {
+        unit = unitDateMatch[1].toUpperCase();
+        foundUnitDate = true;
+
+        // Check if numbers are glued to the unit+date line
+        // e.g., "CT24/03/264,709060,00060,000282,54..."
+        const afterDate = cur.slice(unitDateMatch[0].length);
+        if (afterDate && findBrazilianDecimals(afterDate).length >= 2) {
+          // Numbers are on same line — inject as next line for parsing
+          lines.splice(i + 1, 0, afterDate);
+        }
+
+        i++;
+
+        // Skip optional packaging type line (CX, SACO, BR, etc.)
+        if (i < lines.length && /^(CX|SACO|BR|CT|KG|UN|CAIXA)$/i.test(lines[i].trim())) {
+          i++;
+        }
+        break;
+      }
+
+      // Check if next item starts (means we missed the unit+date)
+      if (matchItemStart(cur)) break;
+
+      // Skip markers like "*", "(ICX)", "(NCX)", "Ref:", page headers
+      if (/^(\*|SeqC[oó]d)/.test(cur)) { i++; continue; }
+
+      // Accumulate description (skip ref lines like "06733 (i)")
+      if (!/^\d{4,6}\s*\(/.test(cur) && cur.length > 1) {
+        descParts.push(cur);
+      }
+      i++;
+    }
+
+    if (!foundUnitDate) continue;
+
+    // Next line should be the numbers line: price,decimalQty,decimal...
+    if (i >= lines.length) break;
+    const numbersLine = lines[i].trim();
+    i++;
+
+    // Extract price and quantity from the numbers line
+    // Format: {price},{4decimal}{qty},{3decimal}{stock},{3decimal}{total},{2decimal}...
+    // Example: "16,644420,0000,000332,896,540,00354,5320521 /"
+    // Or: "143,00451,0001,000143,006,540,00152,3020521 /"
+    const decimals = findBrazilianDecimals(numbersLine);
+    if (decimals.length < 2) continue;
+
+    // First decimal = unit price (Preço Líq.)
+    const unitPrice = decimals[0].value;
+
+    // Second decimal = quantity
+    // But the qty might be merged: "16,644420,000" → price=16.6444, then "20,000" → qty=20
+    // Or "143,00451,000" → price=143.0045, qty=1.000
+    // The trick: qty has 3 decimal places (.000) and price has 4 (.XXXX)
+    let quantity = decimals.length > 1 ? decimals[1].value : 0;
+
+    // Try to fix: if price has 4+ decimals merged with qty
+    const priceRaw = decimals[0].raw;
+    const afterPrice = numbersLine.slice(decimals[0].end);
+    const qtyFromAfter = afterPrice.match(/^(\d{1,6}),(\d{3})/);
+    if (qtyFromAfter) {
+      quantity = parseInt(qtyFromAfter[1], 10);
+    }
+
+    if (unitPrice <= 0 || quantity <= 0) continue;
+
+    const description = descParts
+      .join(" ")
+      .replace(/\s*Ref:\s*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!description || description.length < 3) continue;
+
+    items.push({
+      sku,
+      description,
+      unit,
+      quantity,
+      unitPrice,
+      totalValue: null,
+      ipiPercent: null,
+    });
+  }
+
+  return items.length >= 2 ? items : [];
 }

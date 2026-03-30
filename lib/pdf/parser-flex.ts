@@ -210,10 +210,9 @@ function parseFlexCellMode(lines: string[]): ExtractedPdfItem[] {
   const items: ExtractedPdfItem[] = [];
   let i = 0;
 
-  // Find the "Seq" header line
+  // Find the first "Seq" header line
   while (i < lines.length) {
     if (/^Seq$/i.test(lines[i]?.trim() ?? "")) {
-      // Skip the header block (next lines are column names until we hit a pure number = first seq)
       i++;
       while (i < lines.length && !/^\d+$/.test(lines[i]?.trim() ?? "")) i++;
       break;
@@ -221,8 +220,23 @@ function parseFlexCellMode(lines: string[]): ExtractedPdfItem[] {
     i++;
   }
 
-  // Read blocks of 10 lines per item
-  while (i + 9 < lines.length) {
+  // Read blocks of 10 lines per item, handling page breaks with repeated headers
+  while (i < lines.length) {
+    // Skip repeated page headers (Seq, Código, Descrição, etc.)
+    if (/^Seq$/i.test(lines[i]?.trim() ?? "")) {
+      i++;
+      while (i < lines.length && !/^\d+$/.test(lines[i]?.trim() ?? "")) i++;
+      continue;
+    }
+
+    // Skip non-data lines (footers, totals, metadata)
+    if (/^(Aten[çc][aã]o|Valor|Forma|Observa|Condi[çc][aã]o|Peso|COMPRADOR|R\$)/i.test(lines[i]?.trim() ?? "")) {
+      i++;
+      continue;
+    }
+
+    if (i + 9 >= lines.length) break;
+
     const seq = parseInt(lines[i]?.trim() ?? "", 10);
     const sku = (lines[i + 1] ?? "").trim();
     const description = (lines[i + 2] ?? "").trim();
@@ -257,7 +271,7 @@ function parseFlexCellMode(lines: string[]): ExtractedPdfItem[] {
       });
       i += 10;
     } else {
-      break;
+      i++; // Skip unrecognized line and try next
     }
   }
 
