@@ -16,11 +16,15 @@ export async function GET(request: NextRequest) {
   }
 
   const url = new URL(request.url);
-  const startDate =
+  let startDate =
     url.searchParams.get("startDate") ??
     new Date(Date.now() - 30 * 86400000).toISOString();
-  const endDate =
+  let endDate =
     url.searchParams.get("endDate") ?? new Date().toISOString();
+
+  // Ensure date-only strings include the full day (T23:59:59)
+  if (startDate.length === 10) startDate = `${startDate}T00:00:00.000Z`;
+  if (endDate.length === 10) endDate = `${endDate}T23:59:59.999Z`;
   const userId = url.searchParams.get("userId") ?? undefined;
 
   const data = await getDashboardData({
