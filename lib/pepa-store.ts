@@ -1289,7 +1289,7 @@ function extractDimension(desc: string): string | null {
   return `${left}x${right}`;
 }
 
-/** Product type keywords for dimension/fraction matching safety */
+/** Product type keywords for dimension/fraction/model matching safety */
 const PRODUCT_TYPE_KEYWORDS: string[][] = [
   ["parafuso", "pf ", "p inox"],
   ["chumbador", "cbj"],
@@ -1297,12 +1297,34 @@ const PRODUCT_TYPE_KEYWORDS: string[][] = [
   ["barra", "roscada", "roscavel"],
   ["porca", "po f"],
   ["inox"],
+  ["bomba", "submersa"],
+  ["cabo", "flexivel", "cordao", "fio"],
+  ["disjuntor"],
+  ["conector"],
+  ["tomada"],
+  ["interruptor"],
+  ["lampada"],
+  ["reator"],
+  ["sensor"],
 ];
 
 /**
  * Extract fraction pattern like "1/4", "5/16", "1/2" from description.
  * Common in BARRA and PORCA items.
  */
+/** Extract standalone model/potency numbers (3+ digits, not part of dimensions or dates) */
+function extractModelNumbers(lowerDesc: string): string[] {
+  // Remove dates, dimensions, and known non-model patterns
+  const cleaned = lowerDesc
+    .replace(/\d{2}\/\d{2}\/\d{2,4}/g, "") // dates
+    .replace(/\d+[.,]?\d*\s*[xX]\s*\d+/g, "") // dimensions
+    .replace(/\d+\/\d+/g, ""); // fractions
+  const matches = cleaned.match(/\b(\d{3,4})\b/g);
+  if (!matches) return [];
+  // Filter out common non-model numbers (voltages like 220, 127, 380)
+  return matches.filter((m) => !["220", "127", "380", "110", "100", "200", "500"].includes(m));
+}
+
 function extractFraction(desc: string): string | null {
   const m = desc.match(/(\d+)\/(\d+)/);
   if (!m) return null;
@@ -1328,12 +1350,21 @@ function matchByDimension(descA: string, descB: string): boolean {
   if (dimA && dimB && dimA === dimB) return true;
 
   // Try fraction match (e.g., "1/4", "5/16") — for items without matching dimensions
-  // Only use fraction when at least one side has no full dimension (prevents "1/4X50" matching "1/4X75")
-  // But when dimensions exist but DON'T match, don't fallback to fraction
   if (!(dimA && dimB)) {
     const fracA = extractFraction(descA);
     const fracB = extractFraction(descB);
     if (fracA && fracB && fracA === fracB) return true;
+  }
+
+  // Try model number match (e.g., "800", "950") — for products identified by a standalone number
+  // Extract all 3+ digit numbers that could be model/potency identifiers
+  if (!dimA && !dimB) {
+    const modelsA = extractModelNumbers(lowerA);
+    const modelsB = extractModelNumbers(lowerB);
+    if (modelsA.length > 0 && modelsB.length > 0) {
+      const common = modelsA.filter((m) => modelsB.includes(m));
+      if (common.length > 0) return true;
+    }
   }
 
   return false;

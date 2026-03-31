@@ -347,7 +347,11 @@ export function parseGenericSupplierPdf(lines: string[]): ExtractedPdfItem[] {
   const blockResult = tryBlockExtraction(lines);
   if (blockResult.length > 0) return blockResult;
 
-  // Strategy 4: Token-based
+  // Strategy 4: Columnar format (Rayma-style: each column extracted as separate block)
+  const columnarResult = tryColumnarExtraction(lines);
+  if (columnarResult.length > 0) return columnarResult;
+
+  // Strategy 5: Token-based
   return tryTokenBasedExtraction(lines);
 }
 
@@ -498,6 +502,155 @@ function tryBlockExtraction(lines: string[]): ExtractedPdfItem[] {
       totalValue: null,
       ipiPercent: null,
       supplierRef,
+    });
+  }
+
+  return items.length >= 2 ? items : [];
+}
+
+// ---------- Strategy 4: Columnar extraction ----------
+// For supplier PDFs where pdf-parse extracts each column as a separate block.
+// Example (Rayma): headers "Produto", "Descrição", "Preço Unitário" appear
+// as single lines, followed by all values for that column vertically.
+
+function tryColumnarExtraction(lines: string[]): ExtractedPdfItem[] {
+  // Detect columnar layout: look for known column headers as standalone lines
+  const headerPositions: Array<{ name: string; idx: number }> = [];
+
+  const HEADER_MAP: Record<string, string[]> = {
+    sku: ["produto", "codigo"],
+    description: ["descricao"],
+    quantity: ["quantidade"],
+    unit: ["unidade"],
+    unitPrice: ["preco unitario"],
+    totalPrice: ["preco total"],
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
+
+    // Handle combined headers like "Preço TotalPreço Unitário"
+    if (lower.includes("preco total") && lower.includes("preco unitario")) {
+      headerPositions.push({ name: "unitPrice", idx: i });
+      headerPositions.push({ name: "totalPrice", idx: i });
+      continue;
+    }
+
+    for (const [colName, aliases] of Object.entries(HEADER_MAP)) {
+      if (aliases.some((a) => lower === a || lower === a + ":")) {
+        headerPositions.push({ name: colName, idx: i });
+      }
+    }
+  }
+
+  // Need at least description + price
+  const hasDesc = headerPositions.some((h) => h.name === "description");
+  const hasPrice = headerPositions.some((h) => h.name === "unitPrice" || h.name === "totalPrice");
+  if (!hasDesc || !hasPrice) return [];
+
+  // Sort headers by position
+  headerPositions.sort((a, b) => a.idx - b.idx);
+
+  // Collect values for each column: lines between this header and the next
+  const columns: Record<string, string[]> = {};
+  for (let hi = 0; hi < headerPositions.length; hi++) {
+    const h = headerPositions[hi];
+    const startIdx = h.idx + 1;
+    const endIdx = hi + 1 < headerPositions.length ? headerPositions[hi + 1].idx : lines.length;
+
+    const values: string[] = [];
+    for (let i = startIdx; i < endIdx; i++) {
+      const val = lines[i].trim();
+      if (!val) continue;
+      if (/^(forma|total\s*itens|observa|validade|condi[cç]|vendedor|emissao|documento|volume|divis|peso|cnpj|frete)/i.test(val)) break;
+      if (shouldSkipLine(val)) continue;
+      values.push(val);
+    }
+
+    // For combined header (unitPrice + totalPrice), split values alternating
+    if (h.name === "unitPrice" && columns["unitPrice"]) continue; // already handled
+    if (h.name === "totalPrice" && columns["totalPrice"]) continue;
+
+    if (!columns[h.name]) {
+      columns[h.name] = values;
+    }
+  }
+
+  // Handle combined price header ("Preço TotalPreço Unitário")
+  // Values: first half = unit prices (4 decimals), second half = totals (2 decimals)
+  const descCount = columns.description?.length ?? 0;
+  if (columns.totalPrice && columns.totalPrice.length >= descCount * 2) {
+    const allPrices = columns.totalPrice;
+    columns.unitPrice = allPrices.slice(0, descCount);
+    columns.totalPrice = allPrices.slice(descCount, descCount * 2);
+  } else if (columns.unitPrice && columns.unitPrice.length >= descCount * 2 && !columns.totalPrice?.length) {
+    const allPrices = columns.unitPrice;
+    columns.unitPrice = allPrices.slice(0, descCount);
+    columns.totalPrice = allPrices.slice(descCount, descCount * 2);
+  }
+
+  // Handle quantity: if not found via "Quantidade" header, look for numeric values
+  // between "Item" header (seq numbers) and "Produto" header (SKUs)
+  if (!columns.quantity?.length && columns.sku?.length) {
+    // Find the "Item" header position
+    const itemHeader = headerPositions.find((h) => h.name === "sku");
+    if (itemHeader) {
+      // Collect all values between start and sku header
+      const preSkuValues: string[] = [];
+      for (let i = 0; i < itemHeader.idx; i++) {
+        const val = lines[i].trim();
+        if (/^\d+[,.]?\d*$/.test(val)) preSkuValues.push(val);
+      }
+      // If we have exactly 2x item count, second half = quantities
+      if (preSkuValues.length === descCount * 2) {
+        columns.quantity = preSkuValues.slice(descCount);
+      } else if (preSkuValues.length === descCount) {
+        columns.quantity = preSkuValues;
+      }
+    }
+    // Also try: look for decimal numbers (X,00) just before the sku header
+    if (!columns.quantity?.length) {
+      const skuHeaderIdx = headerPositions.find((h) => h.name === "sku")?.idx ?? 0;
+      const vals: string[] = [];
+      for (let i = skuHeaderIdx - 1; i >= 0; i--) {
+        const val = lines[i].trim();
+        if (/^\d+[,.]?\d*$/.test(val)) vals.unshift(val);
+        else if (vals.length > 0) break;
+      }
+      if (vals.length === descCount) columns.quantity = vals;
+    }
+  }
+
+  const itemCount = columns.description?.length ?? 0;
+  if (itemCount === 0) return [];
+
+  const items: ExtractedPdfItem[] = [];
+  for (let i = 0; i < itemCount; i++) {
+    const description = columns.description?.[i] ?? "";
+    if (!description || description.length < 3) continue;
+
+    const sku = columns.sku?.[i] ?? "";
+    const unit = columns.unit?.[i] ?? "UN";
+    const qtyRaw = columns.quantity?.[i] ?? "0";
+    const quantity = parseDecimal(qtyRaw.replace(/\./g, "").replace(",", ".")) || 1;
+
+    const priceRaw = columns.unitPrice?.[i] ?? "0";
+    const unitPrice = parseDecimal(priceRaw);
+
+    const totalRaw = columns.totalPrice?.[i] ?? "";
+    const totalValue = totalRaw ? parseDecimal(totalRaw) : null;
+
+    const effectivePrice = unitPrice > 0 ? unitPrice : (totalValue && quantity > 0 ? totalValue / quantity : 0);
+    if (effectivePrice <= 0) continue;
+
+    items.push({
+      sku,
+      description,
+      unit: unit.toUpperCase(),
+      quantity,
+      unitPrice: effectivePrice,
+      totalValue: totalValue && totalValue > 0 ? totalValue : null,
+      ipiPercent: null,
     });
   }
 
