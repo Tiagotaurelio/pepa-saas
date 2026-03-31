@@ -1220,29 +1220,46 @@ function classifyUploadFile(file: UploadFileInput): FileCapability {
 function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
   const quoteSku = normalizeComparable(quote.sku);
 
-  // 1. Ref.Fornecedor (Flex) = COD (fornecedor) — exact match
+  // Helper: check if descriptions are compatible (share model numbers or key terms)
+  // This prevents code matches between completely different products (e.g., "950 FIRE" vs "800 LE")
+  const descriptionsCompatible = (): boolean => {
+    const itemDesc = item.description.toLowerCase();
+    const quoteDesc = quote.description.toLowerCase();
+    // Extract model numbers from both
+    const itemModels = extractModelNumbers(itemDesc);
+    const quoteModels = extractModelNumbers(quoteDesc);
+    // If both have model numbers, at least one must match
+    if (itemModels.length > 0 && quoteModels.length > 0) {
+      return itemModels.some((m) => quoteModels.includes(m));
+    }
+    // If no model numbers, accept the code match
+    return true;
+  };
+
+  // 1. Ref.Fornecedor (Flex) = COD (fornecedor) — code match with description validation
   if (item.supplierRef) {
     const itemRef = normalizeComparable(item.supplierRef);
-    if (quoteSku && itemRef && quoteSku === itemRef) return true;
+    let codeMatched = false;
+
+    if (quoteSku && itemRef && quoteSku === itemRef) codeMatched = true;
 
     // Flex often prefixes supplier codes with "W" or "WB" etc.
-    // Try: ref ends with supplier SKU, or supplier SKU ends with ref
-    if (quoteSku && itemRef) {
-      if (itemRef.endsWith(quoteSku) || quoteSku.endsWith(itemRef)) return true;
-      // Try stripping common prefixes from Flex ref: W, WB, WBB
-      for (const prefix of ["w", "wb", "wbb"]) {
-        if (itemRef.startsWith(prefix) && itemRef.slice(prefix.length) === quoteSku) return true;
-      }
-      // Try stripping common prefixes from supplier SKU
-      for (const prefix of ["w", "wb", "wbb"]) {
-        if (quoteSku.startsWith(prefix) && quoteSku.slice(prefix.length) === itemRef) return true;
+    if (!codeMatched && quoteSku && itemRef) {
+      if (itemRef.endsWith(quoteSku) || quoteSku.endsWith(itemRef)) codeMatched = true;
+      if (!codeMatched) {
+        for (const prefix of ["w", "wb", "wbb"]) {
+          if (itemRef.startsWith(prefix) && itemRef.slice(prefix.length) === quoteSku) { codeMatched = true; break; }
+          if (quoteSku.startsWith(prefix) && quoteSku.slice(prefix.length) === itemRef) { codeMatched = true; break; }
+        }
       }
     }
+
+    if (codeMatched && descriptionsCompatible()) return true;
   }
 
-  // 2. SKU direto (PEPA code = supplier code)
+  // 2. SKU direto (PEPA code = supplier code) — with description validation
   const itemSku = normalizeComparable(item.sku);
-  if (quoteSku && itemSku && quoteSku === itemSku) return true;
+  if (quoteSku && itemSku && quoteSku === itemSku && descriptionsCompatible()) return true;
 
   // 3. Descrição normalizada
   const quoteDescription = normalizeComparable(quote.description);
