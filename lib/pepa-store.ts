@@ -1239,7 +1239,7 @@ function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: str
 
   if (headerIdx < 0) return [];
 
-  const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null }> = [];
+  const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
 
   for (let ri = headerIdx + 1; ri < rows.length; ri++) {
     const row = rows[ri];
