@@ -1273,11 +1273,17 @@ function quoteMatchesItem(quote: SupplierQuoteRow, item: RequestedItem) {
   return false;
 }
 
-/** Extract dimension pattern like "3.0x22" from a description, normalized */
+/** Extract dimension pattern from a description, normalized.
+ * Handles: "3.0X22", "3,0X22MM", "1/4X50MM", "5/16X2.1/2" */
 function extractDimension(desc: string): string | null {
+  // Try fraction+size first: "1/4X50", "5/16X2.1/2"
+  const fracDim = desc.match(/(\d+\/\d+)\s*[xX]\s*([\d.,/]+)/);
+  if (fracDim) {
+    return `${fracDim[1]}x${fracDim[2]}`.toLowerCase().replace(/mm$/i, "");
+  }
+  // Standard decimal dimension: "3.0X22", "3,0X22"
   const m = desc.match(/(\d+[.,]?\d*)\s*[xX]\s*(\d+)/);
   if (!m) return null;
-  // Normalize: replace comma with dot, lowercase
   const left = m[1].replace(",", ".");
   const right = m[2];
   return `${left}x${right}`;
@@ -1316,15 +1322,19 @@ function matchByDimension(descA: string, descB: string): boolean {
   }
   if (!sharedType) return false;
 
-  // Try dimension match (e.g., "3.0X22")
+  // Try dimension match (e.g., "3.0X22", "1/4X50")
   const dimA = extractDimension(descA);
   const dimB = extractDimension(descB);
   if (dimA && dimB && dimA === dimB) return true;
 
-  // Try fraction match (e.g., "1/4", "5/16") — for BARRA, PORCA items
-  const fracA = extractFraction(descA);
-  const fracB = extractFraction(descB);
-  if (fracA && fracB && fracA === fracB) return true;
+  // Try fraction match (e.g., "1/4", "5/16") — for items without matching dimensions
+  // Only use fraction when at least one side has no full dimension (prevents "1/4X50" matching "1/4X75")
+  // But when dimensions exist but DON'T match, don't fallback to fraction
+  if (!(dimA && dimB)) {
+    const fracA = extractFraction(descA);
+    const fracB = extractFraction(descB);
+    if (fracA && fracB && fracA === fracB) return true;
+  }
 
   return false;
 }
