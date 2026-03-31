@@ -6,6 +6,8 @@ import { randomUUID } from "node:crypto";
 import pdfParse from "pdf-parse";
 import type { TextExtractionResult } from "./types";
 
+export type TableRow = string[];
+
 /**
  * Extract text lines from a PDF buffer.
  * Strategy: pdf-parse first (fast). If 0 lines, spawn OCR worker process.
@@ -22,6 +24,34 @@ export async function extractTextFromPdf(buffer: Buffer): Promise<TextExtraction
   }
 
   return { lines: [], method: "pdf-parse" };
+}
+
+/**
+ * Extract table rows from PDF using pdfjs-dist with X,Y coordinates.
+ * Returns rows where each row is an array of cell strings in correct column order.
+ * This is MORE RELIABLE than pdf-parse for columnar PDFs.
+ */
+export async function extractTableFromPdf(buffer: Buffer): Promise<TableRow[]> {
+  return extractWithPdfTableWorker(buffer);
+}
+
+async function extractWithPdfTableWorker(buffer: Buffer): Promise<TableRow[]> {
+  const tempPath = join(tmpdir(), `pepa-table-${randomUUID()}.pdf`);
+  try {
+    await writeFile(tempPath, buffer);
+    const workerScript = join(process.cwd(), "scripts", "pdf-to-table.mjs");
+    const rows = await new Promise<TableRow[]>((resolve) => {
+      const timeout = setTimeout(() => resolve([]), 30_000);
+      execFile("node", [workerScript, tempPath], { maxBuffer: 10 * 1024 * 1024 }, (err, stdout) => {
+        clearTimeout(timeout);
+        if (err) { resolve([]); return; }
+        try { const parsed = JSON.parse(stdout); resolve(Array.isArray(parsed) ? parsed : []); }
+        catch { resolve([]); }
+      });
+    });
+    return rows;
+  } catch { return []; }
+  finally { unlink(tempPath).catch(() => {}); }
 }
 
 async function extractWithPdfParse(buffer: Buffer): Promise<string[]> {

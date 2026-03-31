@@ -5,7 +5,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import ExcelJS from "exceljs";
-import { extractTextFromPdf } from "@/lib/pdf/extract-text";
+import { extractTextFromPdf, extractTableFromPdf, type TableRow } from "@/lib/pdf/extract-text";
 import { parseFlexPdf } from "@/lib/pdf/parser-flex";
 import { parseGenericSupplierPdf } from "@/lib/pdf/parser-generic";
 import { parseDecimal, isPlausibleMoneyValue, isPlausibleTotalValue, normalizeComparable, isLikelyUnit, looksLikeHeader } from "@/lib/pdf/parse-helpers";
@@ -744,6 +744,52 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   if (file.name.toLowerCase().endsWith(".pdf")) {
     const { lines } = await extractTextFromPdf(file.buffer);
 
+    // Strategy 1: Extract table using pdfjs-dist with X,Y positions (most reliable for prices)
+    const tableRows = await extractTableFromPdf(file.buffer);
+    const tableItems = parseTableRows(tableRows);
+
+    // Strategy 2: Text-based parsing (better for matching with alternativeRef)
+    const textItems = lines.length > 0 ? parseGenericSupplierPdf(lines) : [];
+
+    // Merge: prefer table items for prices (more accurate), but enrich with text parser's alternativeRef
+    const finalItems = tableItems.length > 0 ? tableItems.map((ti) => {
+      // Find matching text item to get alternativeRef
+      const textMatch = textItems.find((tx) =>
+        normalizeComparable(tx.sku) === normalizeComparable(ti.sku) ||
+        normalizeComparable(tx.description).includes(normalizeComparable(ti.description).slice(0, 15))
+      );
+      return { ...ti, alternativeRef: textMatch?.supplierRef };
+    }) : textItems.length > 0 ? textItems.map((item) => ({
+      sku: item.sku,
+      description: item.description,
+      unitPrice: item.unitPrice,
+      totalValue: item.totalValue,
+      quantity: item.quantity,
+      unit: item.unit,
+      alternativeRef: item.supplierRef,
+    })) : null;
+
+    if (finalItems && finalItems.length > 0) {
+      return {
+        supplierName,
+        sourceFile: file.name,
+        extractionStatus: "parsed",
+        detectedFormat: "pdf",
+        quotedItems: finalItems.map((item) => ({
+          sku: item.sku,
+          description: item.description,
+          unitPrice: item.unitPrice,
+          totalValue: item.totalValue ?? null,
+          quotedQuantity: item.quantity,
+          unit: item.unit,
+          alternativeRef: item.alternativeRef,
+        })),
+        paymentTerms: extractPdfPaymentTerms(lines),
+        freightTerms: extractPdfFreightTerms(lines),
+        quoteDate: extractPdfQuoteDate(lines)
+      };
+    }
+
     if (lines.length === 0) {
       return {
         supplierName,
@@ -1147,6 +1193,99 @@ function detectFileFormat(fileName: string): DetectedFileFormat {
 
 
 // Extrai prazo de pagamento de linhas do PDF
+/**
+ * Parse table rows from pdfjs-dist extraction into structured items.
+ * Each row is an array of cell strings. Finds the header row and maps columns.
+ */
+function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> {
+  if (rows.length < 3) return [];
+
+  // Find header row: must contain at least 2 of: produto/codigo, descricao, preco/valor, quantidade
+  let headerIdx = -1;
+  let colMap: Record<string, number> = {};
+
+  const HEADER_ALIASES: Record<string, string[]> = {
+    sku: ["produto", "codigo", "cod", "item", "ref"],
+    description: ["descricao", "descrição", "nome", "material"],
+    quantity: ["quantidade", "qtde", "qtd", "qt"],
+    unit: ["unidade", "un", "und"],
+    unitPrice: ["preco unitario", "preço unitário", "preco unit", "vlr unit", "vl unit", "valor unitario"],
+    totalPrice: ["preco total", "preço total", "vlr total", "vl total", "valor total", "total"],
+  };
+
+  for (let ri = 0; ri < Math.min(rows.length, 20); ri++) {
+    const row = rows[ri];
+    if (row.length < 3) continue;
+
+    const lowerRow = row.map((c) => c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim());
+    const map: Record<string, number> = {};
+
+    for (let ci = 0; ci < lowerRow.length; ci++) {
+      const cell = lowerRow[ci];
+      for (const [colName, aliases] of Object.entries(HEADER_ALIASES)) {
+        if (aliases.some((a) => cell === a || cell.includes(a))) {
+          if (!map[colName]) map[colName] = ci;
+        }
+      }
+    }
+
+    // Need at least description + one price
+    if (map.description && (map.unitPrice || map.totalPrice)) {
+      headerIdx = ri;
+      colMap = map;
+      break;
+    }
+  }
+
+  if (headerIdx < 0) return [];
+
+  const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null }> = [];
+
+  for (let ri = headerIdx + 1; ri < rows.length; ri++) {
+    const row = rows[ri];
+    if (row.length < 3) continue;
+
+    let desc = (row[colMap.description] ?? "").trim();
+    if (!desc || desc.length < 3) continue;
+
+    // Skip footer/summary rows
+    if (/^(forma|total|observa|validade|condi|vendedor|emissao|documento|aten)/i.test(desc)) break;
+
+    // Extract "Ref:" from description if present (e.g., "ARRUELA F LISA 1/4 ZI Ref:")
+    let alternativeRef: string | undefined;
+    if (/Ref:\s*$/i.test(desc)) {
+      desc = desc.replace(/\s*Ref:\s*$/i, "").trim();
+      // Look for ref code in the next row (e.g., "06733 (i)")
+      const nextRow = rows[ri + 1];
+      if (nextRow && nextRow.length === 1) {
+        const refMatch = nextRow[0].match(/^(\d{4,6})\s*\(/);
+        if (refMatch) {
+          alternativeRef = refMatch[1];
+          ri++; // Skip the ref line
+        }
+      }
+    }
+
+    const sku = colMap.sku != null ? (row[colMap.sku] ?? "").trim() : "";
+    const unit = colMap.unit != null ? (row[colMap.unit] ?? "UN").trim().toUpperCase() : "UN";
+    const qtyStr = colMap.quantity != null ? (row[colMap.quantity] ?? "0").trim() : "0";
+    const quantity = parseDecimal(qtyStr.replace(/\./g, "").replace(",", ".")) || 1;
+
+    const priceStr = colMap.unitPrice != null ? (row[colMap.unitPrice] ?? "0").trim() : "0";
+    const unitPrice = parseDecimal(priceStr);
+
+    const totalStr = colMap.totalPrice != null ? (row[colMap.totalPrice] ?? "").trim() : "";
+    const totalValue = totalStr ? parseDecimal(totalStr) : null;
+
+    const effectivePrice = unitPrice > 0 ? unitPrice : (totalValue && quantity > 0 ? totalValue / quantity : 0);
+    if (effectivePrice <= 0) continue;
+
+    items.push({ sku, description: desc, unit, quantity, unitPrice: effectivePrice, totalValue: totalValue && totalValue > 0 ? totalValue : null, alternativeRef });
+  }
+
+  return items;
+}
+
 function extractPdfPaymentTerms(lines: string[]): string {
   for (let i = 0; i < lines.length; i++) {
     if (/prazo/i.test(lines[i] ?? "")) {

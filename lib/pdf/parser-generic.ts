@@ -624,6 +624,68 @@ function tryColumnarExtraction(lines: string[]): ExtractedPdfItem[] {
   const itemCount = columns.description?.length ?? 0;
   if (itemCount === 0) return [];
 
+  // Parse raw values
+  const quantities = (columns.quantity ?? []).map((q) => parseDecimal(q.replace(/\./g, "").replace(",", ".")) || 1);
+  const unitPrices = (columns.unitPrice ?? []).map((p) => parseDecimal(p));
+  const totals = (columns.totalPrice ?? []).map((t) => parseDecimal(t));
+
+  // Cross-reference: columns may be in different orders in the PDF.
+  // Use total ≈ qty × price to find correct price for each item.
+  // For each description[i], find the correct price by matching against totals.
+  const alignedPrices: number[] = new Array(itemCount).fill(0);
+  const alignedTotals: (number | null)[] = new Array(itemCount).fill(null);
+  const alignedQtys: number[] = new Array(itemCount).fill(1);
+
+  if (totals.length === itemCount && unitPrices.length === itemCount && quantities.length === itemCount) {
+    // Try to align by cross-referencing total = qty * price
+    const usedPriceIdx = new Set<number>();
+    const usedQtyIdx = new Set<number>();
+
+    for (let ti = 0; ti < totals.length; ti++) {
+      const total = totals[ti];
+      if (!total || total <= 0) continue;
+
+      let bestMatch: { qi: number; pi: number; diff: number } | null = null;
+      for (let qi = 0; qi < quantities.length; qi++) {
+        if (usedQtyIdx.has(qi)) continue;
+        for (let pi = 0; pi < unitPrices.length; pi++) {
+          if (usedPriceIdx.has(pi)) continue;
+          const calc = quantities[qi] * unitPrices[pi];
+          const diff = Math.abs(calc - total);
+          if (diff < 0.5 && (!bestMatch || diff < bestMatch.diff)) {
+            bestMatch = { qi, pi, diff };
+          }
+        }
+      }
+
+      if (bestMatch) {
+        // total[ti] corresponds to description[ti] (totals are aligned with descriptions)
+        // But price comes from unitPrices[bestMatch.pi] and qty from quantities[bestMatch.qi]
+        alignedPrices[ti] = unitPrices[bestMatch.pi];
+        alignedTotals[ti] = total;
+        alignedQtys[ti] = quantities[bestMatch.qi];
+        usedPriceIdx.add(bestMatch.pi);
+        usedQtyIdx.add(bestMatch.qi);
+      }
+    }
+
+    // Fill any unmatched items with positional fallback
+    for (let i = 0; i < itemCount; i++) {
+      if (alignedPrices[i] === 0 && unitPrices[i] > 0) {
+        alignedPrices[i] = unitPrices[i];
+        alignedTotals[i] = totals[i] > 0 ? totals[i] : null;
+        alignedQtys[i] = quantities[i];
+      }
+    }
+  } else {
+    // No cross-reference possible, use positional alignment
+    for (let i = 0; i < itemCount; i++) {
+      alignedPrices[i] = unitPrices[i] ?? 0;
+      alignedTotals[i] = totals[i] > 0 ? totals[i] : null;
+      alignedQtys[i] = quantities[i] ?? 1;
+    }
+  }
+
   const items: ExtractedPdfItem[] = [];
   for (let i = 0; i < itemCount; i++) {
     const description = columns.description?.[i] ?? "";
@@ -631,14 +693,9 @@ function tryColumnarExtraction(lines: string[]): ExtractedPdfItem[] {
 
     const sku = columns.sku?.[i] ?? "";
     const unit = columns.unit?.[i] ?? "UN";
-    const qtyRaw = columns.quantity?.[i] ?? "0";
-    const quantity = parseDecimal(qtyRaw.replace(/\./g, "").replace(",", ".")) || 1;
-
-    const priceRaw = columns.unitPrice?.[i] ?? "0";
-    const unitPrice = parseDecimal(priceRaw);
-
-    const totalRaw = columns.totalPrice?.[i] ?? "";
-    const totalValue = totalRaw ? parseDecimal(totalRaw) : null;
+    const quantity = alignedQtys[i];
+    const unitPrice = alignedPrices[i];
+    const totalValue = alignedTotals[i];
 
     const effectivePrice = unitPrice > 0 ? unitPrice : (totalValue && quantity > 0 ? totalValue / quantity : 0);
     if (effectivePrice <= 0) continue;
