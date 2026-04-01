@@ -22,8 +22,14 @@ function parseQuantity(raw: string): number {
  * The date (DD/MM/YYYY) is the reliable anchor separating description from prices.
  */
 export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
-  // Always try merge first — Flex PDFs often split items across multiple lines.
-  // Merging never hurts single-line items (they pass through unchanged).
+  // Detect cell-mode: if "Seq" appears as a standalone line, try cell-mode FIRST
+  const hasCellModeHeader = lines.some((l) => /^Seq$/i.test(l.trim()));
+  if (hasCellModeHeader) {
+    const cellItems = parseFlexCellMode(lines);
+    if (cellItems.length > 0) return cellItems;
+  }
+
+  // Try merge for multi-line PDFs
   const mergedLines = mergeMultiLineItems(lines);
   const mergedItems = parseFlexLineMode(mergedLines);
   if (mergedItems.length > 0) return mergedItems;
@@ -38,7 +44,7 @@ export function parseFlexPdf(lines: string[]): ExtractedPdfItem[] {
   const ocrLineItems = parseFlexLineMode(cleanedMerged);
   if (ocrLineItems.length > 0) return ocrLineItems;
 
-  // Fallback: cell-mode (one value per line, blocks of 10)
+  // Final fallback: cell-mode without header detection
   return parseFlexCellMode(lines);
 }
 

@@ -1237,6 +1237,80 @@ function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: str
     }
   }
 
+  // Strategy B: Repeated-header format (Tramontina-style)
+  // Pattern: ["Descrição"], ["product name"], ["Ordem","Produto","Qtde.",...], ["1","41008106","4",...], ...
+  // Each item has its own header row repeated
+  if (headerIdx < 0) {
+    const repeatedItems: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
+    let ri = 0;
+    while (ri < rows.length) {
+      const row = rows[ri];
+      // Look for ["Descrição"] or ["Descriçao"] as a single-cell row
+      if (row.length === 1 && /^descri[cç][aã]o$/i.test(row[0].normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
+        // Next row should be the product description
+        const descRow = rows[ri + 1];
+        if (!descRow || descRow.length === 0) { ri++; continue; }
+        const description = descRow.join(" ").trim();
+
+        // Next row should be the repeated header (Ordem, Produto, Qtde., Preço Unitário, ...)
+        const headerRow = rows[ri + 2];
+        if (!headerRow || headerRow.length < 4) { ri++; continue; }
+
+        // Next row should be the data
+        const dataRow = rows[ri + 3];
+        if (!dataRow || dataRow.length < 4) { ri++; continue; }
+
+        // Map header columns
+        const hMap: Record<string, number> = {};
+        for (let ci = 0; ci < headerRow.length; ci++) {
+          const cell = headerRow[ci].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+          if (cell.includes("produto") || cell === "codigo") hMap.sku = ci;
+          if (cell.includes("qtde") || cell.includes("quantidade")) hMap.qty = ci;
+          if ((cell.includes("preco unitario") || cell.includes("preço unitário")) && !cell.includes("x preco") && !cell.includes("x preço") && !cell.includes("qtde x")) hMap.price = ci;
+          if (cell.includes("emb")) hMap.emb = ci;
+        }
+
+        const sku = hMap.sku != null ? (dataRow[hMap.sku] ?? "").trim() : "";
+        const qtyStr = hMap.qty != null ? (dataRow[hMap.qty] ?? "0").trim() : "0";
+        const quantity = parseDecimal(qtyStr.replace(/\./g, "").replace(",", ".")) || 1;
+        const priceStr = hMap.price != null ? (dataRow[hMap.price] ?? "0").trim() : "0";
+        const unitPrice = parseDecimal(priceStr);
+
+        // Check next block for "Preço Unitário sem IPI" or "Valor total"
+        let totalValue: number | null = null;
+        const extraHeaderRow = rows[ri + 4];
+        const extraDataRow = rows[ri + 5];
+        if (extraHeaderRow && extraDataRow) {
+          for (let ci = 0; ci < extraHeaderRow.length; ci++) {
+            const cell = extraHeaderRow[ci].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            if (cell.includes("valor total")) {
+              totalValue = parseDecimal(extraDataRow[ci] ?? "0");
+            }
+          }
+        }
+
+        if (description.length >= 3 && unitPrice > 0) {
+          // Calculate quantity: might be in embalagens (Emb. x Qtde.)
+          let effectiveQty = quantity;
+          if (hMap.emb != null) {
+            const embStr = (dataRow[hMap.emb] ?? "1").trim();
+            const emb = parseInt(embStr, 10);
+            if (emb > 1) effectiveQty = quantity * emb;
+          }
+
+          repeatedItems.push({
+            sku, description, unit: "UN", quantity: effectiveQty, unitPrice, totalValue
+          });
+        }
+
+        ri += 4; // Skip past this item block
+        continue;
+      }
+      ri++;
+    }
+    if (repeatedItems.length >= 2) return repeatedItems;
+  }
+
   if (headerIdx < 0) return [];
 
   const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
