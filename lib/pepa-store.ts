@@ -581,14 +581,52 @@ function convertSupplierPriceToFlexUnit(
     }
   }
 
-  // PCT → UN or UN → PCT (pacotes): try qty ratio
+  // CT/CX/PCT → UN conversion: supplier sells per box/pack, Flex counts per unit
+  // Extract pieces per pack from Flex description (e.g., "50PC", "100PC", "200PC")
+  if ((sUnit === "CT" || sUnit === "CX" || sUnit === "PCT" || sUnit === "KIT") && (fUnit === "UN" || fUnit === "UND" || fUnit === "UNID" || fUnit === "PC" || fUnit === "PCA")) {
+    const pcsMatch = flexDescription.match(/(\d+)\s*PC\b/i);
+    if (pcsMatch) {
+      const piecesPerPack = parseInt(pcsMatch[1], 10);
+      if (piecesPerPack > 0) {
+        return {
+          convertedPrice: roundCurrency(supplierUnitPrice / piecesPerPack),
+          convertedQty: supplierQty != null ? supplierQty * piecesPerPack : null
+        };
+      }
+    }
+  }
+
+  // UN → CT/CX conversion (reverse): Flex counts per pack, supplier sells per unit
+  if ((fUnit === "CT" || fUnit === "CX" || fUnit === "PCT") && (sUnit === "UN" || sUnit === "UND" || sUnit === "UNID" || sUnit === "PC")) {
+    const pcsMatch = flexDescription.match(/(\d+)\s*PC\b/i);
+    if (pcsMatch) {
+      const piecesPerPack = parseInt(pcsMatch[1], 10);
+      if (piecesPerPack > 0) {
+        return {
+          convertedPrice: roundCurrency(supplierUnitPrice * piecesPerPack),
+          convertedQty: supplierQty != null ? Math.round(supplierQty / piecesPerPack) : null
+        };
+      }
+    }
+  }
+
+  // General qty ratio fallback: if quantities don't match, try to infer conversion
   if (supplierQty != null && supplierQty > 0 && flexQty > 0 && supplierQty !== flexQty) {
     const ratio = flexQty / supplierQty;
     if (ratio > 1 && Number.isInteger(ratio)) {
-      // Supplier sends in packs, Flex counts units
+      // Supplier sends in bigger packs, Flex counts smaller units
       return {
         convertedPrice: roundCurrency(supplierUnitPrice / ratio),
         convertedQty: supplierQty * ratio
+      };
+    }
+    const reverseRatio = supplierQty / flexQty;
+    if (reverseRatio > 1 && Number.isInteger(reverseRatio)) {
+      // Supplier sends in smaller packs (CT), Flex counts bigger packs (CX)
+      // e.g., Flex 20 CX, Supplier 40 CT → 1 CX = 2 CT → price per CX = price * 2
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice * reverseRatio),
+        convertedQty: Math.round(supplierQty / reverseRatio)
       };
     }
   }
