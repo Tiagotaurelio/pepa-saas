@@ -704,10 +704,12 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
     return [];
   }
 
-  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item"]);
-  const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao"]);
+  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item", "codigo_pepa", "cod", "seq"]);
+  const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao", "nome", "material"]);
   const unitIndex = findHeaderIndex(table.headers, ["unidade", "un", "und"]);
   const quantityIndex = findHeaderIndex(table.headers, ["quantidade", "qtd", "qtde"]);
+  const refIndex = findHeaderIndex(table.headers, ["ref_fornecedor", "ref", "ref.forn", "codigo_fornecedor"]);
+  const priceIndex = findHeaderIndex(table.headers, ["vl._unitario", "vl_unitario", "preco_unitario", "valor_unitario", "preco_unit"]);
 
   if (skuIndex < 0 || descriptionIndex < 0 || quantityIndex < 0) {
     return [];
@@ -719,7 +721,9 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
       description: columns[descriptionIndex] ?? "",
       unit: columns[unitIndex] ?? "UN",
       requestedQuantity: parseDecimal(columns[quantityIndex] ?? ""),
-      source: "inferred-from-quote" as const
+      source: "real-supplier-quote" as const,
+      supplierRef: refIndex >= 0 ? (columns[refIndex] ?? "").trim() : undefined,
+      baseUnitPrice: priceIndex >= 0 ? parseDecimal(columns[priceIndex] ?? "") : undefined
     }))
     .filter((item) => item.sku && item.description && Number.isFinite(item.requestedQuantity) && item.requestedQuantity > 0);
 }
@@ -858,12 +862,12 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     };
   }
 
-  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item"]);
-  const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao"]);
+  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item", "produto", "cod", "ordem"]);
+  const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao", "nome", "material"]);
   const unitPriceIndex = findHeaderIndex(table.headers, [
-    "preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price"
+    "preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price", "vl._unitario", "vl_unitario", "preco_liq"
   ]);
-  const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total"]);
+  const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total", "vl._total", "vl_total"]);
 
   if ((skuIndex < 0 && descriptionIndex < 0) || unitPriceIndex < 0) {
     // For .txt files with concatenated supplier format (e.g. CORFIO), try the generic parser
@@ -1015,7 +1019,14 @@ async function parseTabularFile(file: UploadFileInput): Promise<ParsedTable | nu
 }
 
 function findHeaderIndex(headers: string[], aliases: string[]) {
-  return headers.findIndex((header) => aliases.includes(normalizeHeader(header)));
+  // Try exact match first
+  const exact = headers.findIndex((header) => aliases.includes(normalizeHeader(header)));
+  if (exact >= 0) return exact;
+  // Try partial match (header contains alias or alias contains header)
+  return headers.findIndex((header) => {
+    const normalized = normalizeHeader(header);
+    return aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized));
+  });
 }
 
 function parseDelimitedLine(line: string): string[] {
