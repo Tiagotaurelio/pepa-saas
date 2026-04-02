@@ -924,7 +924,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   }
   // Find unit price - but exclude columns with "sem ipi" or "x preco"
   let unitPriceIndex = -1;
-  const priceAliases = ["preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price", "vl._unitario", "vl_unitario", "preco_liq"];
+  const priceAliases = ["preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price", "vl._unitario", "vl_unitario", "preco_liq", "preco", "preco_final"];
   for (let i = 0; i < table.headers.length; i++) {
     const norm = normalizeHeader(table.headers[i]);
     if (norm.includes("sem_ipi") || norm.includes("qtde_x") || norm.includes("x_preco")) continue;
