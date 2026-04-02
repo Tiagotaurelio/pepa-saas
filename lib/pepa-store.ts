@@ -742,34 +742,38 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
   }
 
   if (file.name.toLowerCase().endsWith(".pdf")) {
-    const { lines } = await extractTextFromPdf(file.buffer);
-
-    // Strategy 1: Extract table using pdfjs-dist with X,Y positions (most reliable for prices)
+    // PRIMARY: Extract table using pdfjs-dist with X,Y positions (most reliable for all supplier PDFs)
     const tableRows = await extractTableFromPdf(file.buffer);
     const tableItems = parseTableRows(tableRows);
 
-    // Strategy 2: Text-based parsing (better for matching with alternativeRef)
+    // Extract text lines (used for payment/freight/date terms and as fallback parser input)
+    const { lines } = await extractTextFromPdf(file.buffer);
+
+    // Also try text-based parser for comparison
     const textItems = lines.length > 0 ? parseGenericSupplierPdf(lines) : [];
 
-    // Merge: prefer table items for prices (more accurate), but enrich with text parser's alternativeRef
-    const finalItems = tableItems.length > 0 ? tableItems.map((ti) => {
-      // Find matching text item to get alternativeRef
-      const textMatch = textItems.find((tx) =>
-        normalizeComparable(tx.sku) === normalizeComparable(ti.sku) ||
-        normalizeComparable(tx.description).includes(normalizeComparable(ti.description).slice(0, 15))
-      );
-      return { ...ti, alternativeRef: textMatch?.supplierRef };
-    }) : textItems.length > 0 ? textItems.map((item) => ({
-      sku: item.sku,
-      description: item.description,
-      unitPrice: item.unitPrice,
-      totalValue: item.totalValue,
-      quantity: item.quantity,
-      unit: item.unit,
-      alternativeRef: item.supplierRef,
-    })) : null;
+    // Use whichever method extracted MORE items (table or text parser)
+    const useTable = tableItems.length >= textItems.length && tableItems.length > 0;
+    const primaryItems = useTable ? tableItems : textItems;
 
-    if (finalItems && finalItems.length > 0) {
+    if (primaryItems.length > 0) {
+      // Enrich with alternativeRef from text-based parser if using table items
+      const finalItems = useTable ? tableItems.map((ti) => {
+        const textMatch = textItems.find((tx) =>
+          normalizeComparable(tx.sku) === normalizeComparable(ti.sku) ||
+          normalizeComparable(tx.description).includes(normalizeComparable(ti.description).slice(0, 15))
+        );
+        return { ...ti, alternativeRef: ti.alternativeRef ?? textMatch?.supplierRef };
+      }) : textItems.map((item) => ({
+        sku: item.sku,
+        description: item.description,
+        unitPrice: item.unitPrice,
+        totalValue: item.totalValue,
+        quantity: item.quantity,
+        unit: item.unit,
+        alternativeRef: item.supplierRef,
+      }));
+
       return {
         supplierName,
         sourceFile: file.name,
@@ -790,6 +794,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
       };
     }
 
+    // FALLBACK: Table extraction returned 0 items — try text-based generic parser
     if (lines.length === 0) {
       return {
         supplierName,
@@ -1198,132 +1203,118 @@ function detectFileFormat(fileName: string): DetectedFileFormat {
  * Each row is an array of cell strings. Finds the header row and maps columns.
  */
 function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> {
-  if (rows.length < 3) return [];
+  if (rows.length < 2) return [];
 
-  // Find header row: must contain at least 2 of: produto/codigo, descricao, preco/valor, quantidade
-  let headerIdx = -1;
-  let colMap: Record<string, number> = {};
-
+  // --- Expanded header aliases ---
   const HEADER_ALIASES: Record<string, string[]> = {
-    sku: ["produto", "codigo", "cod", "item", "ref"],
+    sku: ["produto", "codigo", "cod", "item", "ref", "ordem", "seq"],
     description: ["descricao", "descrição", "nome", "material"],
     quantity: ["quantidade", "qtde", "qtd", "qt"],
     unit: ["unidade", "un", "und"],
-    unitPrice: ["preco unitario", "preço unitário", "preco unit", "vlr unit", "vl unit", "valor unitario"],
-    totalPrice: ["preco total", "preço total", "vlr total", "vl total", "valor total", "total"],
+    unitPrice: ["preco unitario", "preço unitário", "preco unit", "vlr unit", "vl unit", "valor unitario", "p.unit"],
+    totalPrice: ["preco total", "preço total", "vlr total", "vl total", "valor total", "total", "vlr.prod"],
   };
 
-  for (let ri = 0; ri < Math.min(rows.length, 20); ri++) {
-    const row = rows[ri];
-    if (row.length < 3) continue;
+  // Cells that should NEVER match unitPrice (they are computed columns like "Qtde x Preço")
+  const UNIT_PRICE_EXCLUDES = ["x preco", "x preço", "qtde x", "qtd x"];
 
-    const lowerRow = row.map((c) => c.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim());
+  /** Normalize a header cell for alias matching */
+  const norm = (s: string) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+
+  /** Try to map header columns from a row. Returns null if not enough columns matched. */
+  function tryMapHeader(row: TableRow): Record<string, number> | null {
+    if (row.length < 3) return null;
     const map: Record<string, number> = {};
 
-    for (let ci = 0; ci < lowerRow.length; ci++) {
-      const cell = lowerRow[ci];
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = norm(row[ci]);
       for (const [colName, aliases] of Object.entries(HEADER_ALIASES)) {
+        // Skip if this column is already mapped
+        if (map[colName] != null) continue;
+        // For unitPrice, exclude misleading cells like "Qtde x Preço unitário"
+        if (colName === "unitPrice" && UNIT_PRICE_EXCLUDES.some((ex) => cell.includes(ex))) continue;
         if (aliases.some((a) => cell === a || cell.includes(a))) {
-          if (!map[colName]) map[colName] = ci;
+          map[colName] = ci;
         }
       }
     }
 
-    // Need at least description + one price
-    if (map.description && (map.unitPrice || map.totalPrice)) {
+    // "produto" can be EITHER sku or description depending on context.
+    // If "produto" matched as sku but there's no separate description column,
+    // and the data in that column looks like text (not a code), reclassify it.
+    if (map.sku != null && map.description == null) {
+      const skuAlias = norm(row[map.sku]);
+      if (skuAlias === "produto" || skuAlias.includes("produto")) {
+        // Check: is there another column with "descricao"? If not, "produto" IS the description.
+        // We'll resolve this ambiguity when we see data rows.
+        // For now, mark description = sku position and clear sku.
+        map.description = map.sku;
+        delete map.sku;
+      }
+    }
+
+    // Need at least description + one price to be a valid header
+    if (map.description != null && (map.unitPrice != null || map.totalPrice != null)) {
+      return map;
+    }
+    return null;
+  }
+
+  // =====================================================================
+  // Strategy A: Single header row followed by data rows (Rayma, Corfio, Jomarca, standard)
+  // =====================================================================
+  let headerIdx = -1;
+  let colMap: Record<string, number> = {};
+
+  for (let ri = 0; ri < Math.min(rows.length, 30); ri++) {
+    const mapped = tryMapHeader(rows[ri]);
+    if (mapped) {
       headerIdx = ri;
-      colMap = map;
+      colMap = mapped;
       break;
     }
   }
 
+  // =====================================================================
   // Strategy B: Repeated-header format (Tramontina-style)
   // Pattern: ["Descrição"], ["product name"], ["Ordem","Produto","Qtde.",...], ["1","41008106","4",...], ...
-  // Each item has its own header row repeated
+  // Each item has its own header block repeated throughout the PDF.
+  // =====================================================================
   if (headerIdx < 0) {
-    const repeatedItems: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
-    let ri = 0;
-    while (ri < rows.length) {
-      const row = rows[ri];
-      // Look for ["Descrição"] or ["Descriçao"] as a single-cell row
-      if (row.length === 1 && /^descri[cç][aã]o$/i.test(row[0].normalize("NFD").replace(/[\u0300-\u036f]/g, ""))) {
-        // Next row should be the product description
-        const descRow = rows[ri + 1];
-        if (!descRow || descRow.length === 0) { ri++; continue; }
-        const description = descRow.join(" ").trim();
+    const repeatedItems = parseRepeatedHeaderFormat(rows, norm, UNIT_PRICE_EXCLUDES);
+    if (repeatedItems.length >= 1) return repeatedItems;
+  }
 
-        // Next row should be the repeated header (Ordem, Produto, Qtde., Preço Unitário, ...)
-        const headerRow = rows[ri + 2];
-        if (!headerRow || headerRow.length < 4) { ri++; continue; }
-
-        // Next row should be the data
-        const dataRow = rows[ri + 3];
-        if (!dataRow || dataRow.length < 4) { ri++; continue; }
-
-        // Map header columns
-        const hMap: Record<string, number> = {};
-        for (let ci = 0; ci < headerRow.length; ci++) {
-          const cell = headerRow[ci].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-          if (cell.includes("produto") || cell === "codigo") hMap.sku = ci;
-          if (cell.includes("qtde") || cell.includes("quantidade")) hMap.qty = ci;
-          if ((cell.includes("preco unitario") || cell.includes("preço unitário")) && !cell.includes("x preco") && !cell.includes("x preço") && !cell.includes("qtde x")) hMap.price = ci;
-          if (cell.includes("emb")) hMap.emb = ci;
-        }
-
-        const sku = hMap.sku != null ? (dataRow[hMap.sku] ?? "").trim() : "";
-        const qtyStr = hMap.qty != null ? (dataRow[hMap.qty] ?? "0").trim() : "0";
-        const quantity = parseDecimal(qtyStr.replace(/\./g, "").replace(",", ".")) || 1;
-        const priceStr = hMap.price != null ? (dataRow[hMap.price] ?? "0").trim() : "0";
-        const unitPrice = parseDecimal(priceStr);
-
-        // Check next block for "Preço Unitário sem IPI" or "Valor total"
-        let totalValue: number | null = null;
-        const extraHeaderRow = rows[ri + 4];
-        const extraDataRow = rows[ri + 5];
-        if (extraHeaderRow && extraDataRow) {
-          for (let ci = 0; ci < extraHeaderRow.length; ci++) {
-            const cell = extraHeaderRow[ci].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-            if (cell.includes("valor total")) {
-              totalValue = parseDecimal(extraDataRow[ci] ?? "0");
-            }
-          }
-        }
-
-        if (description.length >= 3 && unitPrice > 0) {
-          // Calculate quantity: might be in embalagens (Emb. x Qtde.)
-          let effectiveQty = quantity;
-          if (hMap.emb != null) {
-            const embStr = (dataRow[hMap.emb] ?? "1").trim();
-            const emb = parseInt(embStr, 10);
-            if (emb > 1) effectiveQty = quantity * emb;
-          }
-
-          repeatedItems.push({
-            sku, description, unit: "UN", quantity: effectiveQty, unitPrice, totalValue
-          });
-        }
-
-        ri += 4; // Skip past this item block
-        continue;
-      }
-      ri++;
-    }
-    if (repeatedItems.length >= 2) return repeatedItems;
+  // =====================================================================
+  // Strategy C: No explicit header found — try heuristic row scanning
+  // Some PDFs (Corfio/Jomarca) have rows where pdfjs splits cells in unexpected ways.
+  // Look for rows where multiple cells look like numbers (qty, price, total).
+  // =====================================================================
+  if (headerIdx < 0) {
+    const heuristicItems = parseHeuristicRows(rows);
+    if (heuristicItems.length >= 2) return heuristicItems;
   }
 
   if (headerIdx < 0) return [];
 
+  // =====================================================================
+  // Extract data rows using the single-header colMap
+  // =====================================================================
   const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
 
   for (let ri = headerIdx + 1; ri < rows.length; ri++) {
     const row = rows[ri];
     if (row.length < 3) continue;
 
+    // Skip rows that look like a repeated header (same row structure)
+    const reHeader = tryMapHeader(row);
+    if (reHeader && reHeader.description != null && (reHeader.unitPrice != null || reHeader.totalPrice != null)) continue;
+
     let desc = (row[colMap.description] ?? "").trim();
     if (!desc || desc.length < 3) continue;
 
     // Skip footer/summary rows
-    if (/^(forma|total|observa|validade|condi|vendedor|emissao|documento|aten)/i.test(desc)) break;
+    if (/^(forma|total\b|observa|validade|condi|vendedor|emissao|documento|aten|prazo|assinatura|base de calc)/i.test(desc)) break;
 
     // Extract "Ref:" from description if present (e.g., "ARRUELA F LISA 1/4 ZI Ref:")
     let alternativeRef: string | undefined;
@@ -1355,6 +1346,188 @@ function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: str
     if (effectivePrice <= 0) continue;
 
     items.push({ sku, description: desc, unit, quantity, unitPrice: effectivePrice, totalValue: totalValue && totalValue > 0 ? totalValue : null, alternativeRef });
+  }
+
+  return items;
+}
+
+/**
+ * Strategy B: Repeated-header format (Tramontina-style).
+ * Pattern: ["Descrição"], ["product name"], ["Ordem","Produto","Qtde.",...], ["1","41008106","4",...], ...
+ */
+function parseRepeatedHeaderFormat(
+  rows: TableRow[],
+  norm: (s: string) => string,
+  unitPriceExcludes: string[]
+): Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> {
+  const repeatedItems: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
+  let ri = 0;
+  while (ri < rows.length) {
+    const row = rows[ri];
+    // Look for ["Descrição"] or ["Descriçao"] as a single-cell or two-cell row
+    const isDescLabel = row.length <= 2 && row.some((cell) =>
+      /^descri[cç][aã]o$/i.test(cell.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim())
+    );
+    if (!isDescLabel) { ri++; continue; }
+
+    // Next row should be the product description
+    const descRow = rows[ri + 1];
+    if (!descRow || descRow.length === 0) { ri++; continue; }
+    const description = descRow.join(" ").trim();
+
+    // Next row should be the repeated header (Ordem, Produto, Qtde., Preço Unitário, ...)
+    const headerRow = rows[ri + 2];
+    if (!headerRow || headerRow.length < 3) { ri++; continue; }
+
+    // Next row should be the data
+    const dataRow = rows[ri + 3];
+    if (!dataRow || dataRow.length < 3) { ri++; continue; }
+
+    // Map header columns
+    const hMap: Record<string, number> = {};
+    for (let ci = 0; ci < headerRow.length; ci++) {
+      const cell = norm(headerRow[ci]);
+      if (!hMap.sku && (cell.includes("produto") || cell === "codigo" || cell === "cod" || cell === "ordem")) hMap.sku = ci;
+      if (!hMap.qty && (cell.includes("qtde") || cell.includes("quantidade") || cell.includes("qtd"))) hMap.qty = ci;
+      if (!hMap.price) {
+        const isPriceCell = cell.includes("preco unitario") || cell.includes("preco unit") || cell.includes("vlr unit") || cell.includes("vl unit") || cell.includes("p.unit");
+        const isExcluded = unitPriceExcludes.some((ex) => cell.includes(ex));
+        if (isPriceCell && !isExcluded) hMap.price = ci;
+      }
+      if (!hMap.emb && cell.includes("emb")) hMap.emb = ci;
+    }
+
+    const sku = hMap.sku != null ? (dataRow[hMap.sku] ?? "").trim() : "";
+    const qtyStr = hMap.qty != null ? (dataRow[hMap.qty] ?? "0").trim() : "0";
+    const quantity = parseDecimal(qtyStr.replace(/\./g, "").replace(",", ".")) || 1;
+    const priceStr = hMap.price != null ? (dataRow[hMap.price] ?? "0").trim() : "0";
+    const unitPrice = parseDecimal(priceStr);
+
+    // Check next block for "Preço Unitário sem IPI" or "Valor total"
+    let totalValue: number | null = null;
+    const extraHeaderRow = rows[ri + 4];
+    const extraDataRow = rows[ri + 5];
+    if (extraHeaderRow && extraDataRow) {
+      for (let ci = 0; ci < extraHeaderRow.length; ci++) {
+        const cell = norm(extraHeaderRow[ci]);
+        if (cell.includes("valor total")) {
+          totalValue = parseDecimal(extraDataRow[ci] ?? "0");
+        }
+      }
+    }
+
+    if (description.length >= 3 && unitPrice > 0) {
+      // Calculate quantity: might be in embalagens (Emb. x Qtde.)
+      let effectiveQty = quantity;
+      if (hMap.emb != null) {
+        const embStr = (dataRow[hMap.emb] ?? "1").trim();
+        const emb = parseInt(embStr, 10);
+        if (emb > 1) effectiveQty = quantity * emb;
+      }
+
+      repeatedItems.push({
+        sku, description, unit: "UN", quantity: effectiveQty, unitPrice, totalValue
+      });
+    }
+
+    ri += 4; // Skip past this item block
+    continue;
+  }
+  return repeatedItems;
+}
+
+/**
+ * Strategy C: Heuristic row scanning for PDFs without clear headers.
+ * Looks for rows that have a text cell (description) alongside numeric cells (prices).
+ */
+function parseHeuristicRows(
+  rows: TableRow[]
+): Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> {
+  const items: Array<{ sku: string; description: string; unit: string; quantity: number; unitPrice: number; totalValue: number | null; alternativeRef?: string }> = [];
+
+  const BR_NUMBER = /^\d{1,3}(?:\.\d{3})*,\d{2,4}$/;
+  const isUnit = (s: string) => /^(UN|UND|UNID|ROLO|RL|M|MT|PCA|PC|KIT|CJ|CX|KG|GR|JG|TON|R|U|L)$/i.test(s.trim());
+
+  for (const row of rows) {
+    if (row.length < 3) continue;
+
+    // Count numeric cells (Brazilian format) and text cells
+    const numericIndices: number[] = [];
+    const textIndices: number[] = [];
+    const unitIndices: number[] = [];
+
+    for (let ci = 0; ci < row.length; ci++) {
+      const cell = row[ci].trim();
+      if (!cell) continue;
+      if (BR_NUMBER.test(cell) || /^\d+$/.test(cell)) {
+        numericIndices.push(ci);
+      } else if (isUnit(cell)) {
+        unitIndices.push(ci);
+      } else if (cell.length >= 5 && /[a-zA-ZÀ-ÿ]/.test(cell)) {
+        textIndices.push(ci);
+      }
+    }
+
+    // Need at least 1 text (description) and 2 numeric (qty + price or price + total)
+    if (textIndices.length < 1 || numericIndices.length < 2) continue;
+
+    // The longest text cell is likely the description
+    const descIdx = textIndices.reduce((best, ci) =>
+      row[ci].length > row[best].length ? ci : best, textIndices[0]);
+    const desc = row[descIdx].trim();
+
+    // Skip if description looks like a header or footer
+    if (/^(item|produto|descri|forma|total\b|observa|validade|condi|vendedor|emissao)/i.test(desc)) continue;
+
+    // Among numeric cells, the last two are likely unitPrice and totalPrice
+    // Or if there are 3+, they could be qty, unitPrice, totalPrice
+    const nums = numericIndices.map((ci) => ({
+      idx: ci,
+      value: parseDecimal(row[ci].trim())
+    })).filter((n) => !isNaN(n.value) && n.value > 0);
+
+    if (nums.length < 1) continue;
+
+    let quantity = 1;
+    let unitPrice = 0;
+    let totalValue: number | null = null;
+    const unit = unitIndices.length > 0 ? row[unitIndices[0]].trim().toUpperCase() : "UN";
+
+    if (nums.length >= 3) {
+      // Likely: qty, unitPrice, totalPrice
+      quantity = nums[0].value;
+      unitPrice = nums[nums.length - 2].value;
+      totalValue = nums[nums.length - 1].value;
+    } else if (nums.length === 2) {
+      // Could be unitPrice + totalPrice, or qty + unitPrice
+      if (nums[0].value < 1000 && nums[1].value > nums[0].value) {
+        // Looks like qty + total or unitPrice + total
+        unitPrice = nums[0].value;
+        totalValue = nums[1].value;
+      } else {
+        unitPrice = nums[0].value;
+        totalValue = nums[1].value;
+      }
+    } else {
+      unitPrice = nums[0].value;
+    }
+
+    // Derive unitPrice from total if needed
+    const effectivePrice = unitPrice > 0 ? unitPrice : (totalValue && quantity > 0 ? totalValue / quantity : 0);
+    if (effectivePrice <= 0) continue;
+
+    // Basic sku: first short numeric cell before description
+    const skuCandidates = numericIndices.filter((ci) => ci < descIdx && row[ci].trim().length <= 8);
+    const sku = skuCandidates.length > 0 ? row[skuCandidates[0]].trim() : "";
+
+    items.push({
+      sku,
+      description: desc,
+      unit,
+      quantity,
+      unitPrice: effectivePrice,
+      totalValue: totalValue && totalValue > 0 ? totalValue : null,
+    });
   }
 
   return items;
