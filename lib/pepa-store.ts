@@ -601,27 +601,38 @@ function buildComparisonRows(
   supplierFiles: ParsedSupplierFile[]
 ): ComparisonRow[] {
   return requestedItems.map((item, index) => {
-    const matchedQuotes = supplierFiles
+    // First try exact code match (ref = sku), then fuzzy matches
+    let matchedQuotes = supplierFiles
       .flatMap((file) =>
         file.quotedItems
-          .filter((quote) => quoteMatchesItem(quote, item))
+          .filter((quote) => quoteMatchesItemByCode(quote, item))
           .map((quote) => {
-            // Convert supplier price to Flex unit if units differ
             const { convertedPrice, convertedQty } = convertSupplierPriceToFlexUnit(
-              quote.unitPrice,
-              quote.unit,
-              item.unit,
-              item.description,
-              quote.quotedQuantity,
-              item.requestedQuantity
+              quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity
             );
-            return {
-              supplierName: file.supplierName,
+            return { supplierName: file.supplierName,
               quote: { ...quote, unitPrice: convertedPrice, quotedQuantity: convertedQty ?? quote.quotedQuantity }
             };
           })
       )
       .sort((left, right) => left.quote.unitPrice - right.quote.unitPrice);
+
+    // If no code match found, try fuzzy matching (description, dimension, model)
+    if (matchedQuotes.length === 0) {
+      matchedQuotes = supplierFiles
+        .flatMap((file) =>
+          file.quotedItems
+            .filter((quote) => quoteMatchesItem(quote, item))
+            .map((quote) => {
+              const { convertedPrice, convertedQty } = convertSupplierPriceToFlexUnit(
+                quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity
+              );
+              return { supplierName: file.supplierName,
+                quote: { ...quote, unitPrice: convertedPrice, quotedQuantity: convertedQty ?? quote.quotedQuantity } };
+            })
+        )
+        .sort((left, right) => left.quote.unitPrice - right.quote.unitPrice);
+    }
 
     const bestQuote = matchedQuotes[0] ?? null;
     const offers: ComparisonOffer[] = matchedQuotes.map(({ supplierName, quote }) => ({
@@ -704,11 +715,11 @@ async function extractRequestedItemsFromMirror(file: UploadFileInput): Promise<R
     return [];
   }
 
-  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item", "codigo_pepa", "cod", "seq"]);
+  const skuIndex = findHeaderIndex(table.headers, ["codigo_pepa", "sku", "codigo", "codigo_produto", "cod"]);
   const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao", "nome", "material"]);
   const unitIndex = findHeaderIndex(table.headers, ["unidade", "un", "und"]);
   const quantityIndex = findHeaderIndex(table.headers, ["quantidade", "qtd", "qtde"]);
-  const refIndex = findHeaderIndex(table.headers, ["ref_fornecedor", "ref", "ref.forn", "codigo_fornecedor"]);
+  const refIndex = findHeaderIndex(table.headers, ["ref_fornecedor", "ref._fornecedor", "ref.forn", "codigo_fornecedor"]);
   const priceIndex = findHeaderIndex(table.headers, ["vl._unitario", "vl_unitario", "preco_unitario", "valor_unitario", "preco_unit"]);
 
   if (skuIndex < 0 || descriptionIndex < 0 || quantityIndex < 0) {
@@ -862,11 +873,28 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     };
   }
 
-  const skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "item", "produto", "cod", "ordem"]);
-  const descriptionIndex = findHeaderIndex(table.headers, ["descricao", "produto", "item_descricao", "nome", "material"]);
-  const unitPriceIndex = findHeaderIndex(table.headers, [
-    "preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price", "vl._unitario", "vl_unitario", "preco_liq"
-  ]);
+  let descriptionIndex = findHeaderIndex(table.headers, ["descricao", "item_descricao", "nome", "material"]);
+  let skuIndex = findHeaderIndex(table.headers, ["sku", "codigo", "codigo_produto", "cod", "produto"]);
+  // If SKU and description point to the same column, try to disambiguate
+  if (skuIndex >= 0 && skuIndex === descriptionIndex) {
+    // "produto" matched both - use it as SKU and find another description
+    descriptionIndex = -1;
+  }
+  // If no description found, try "produto" as description instead
+  if (descriptionIndex < 0 && skuIndex < 0) {
+    descriptionIndex = findHeaderIndex(table.headers, ["produto"]);
+  }
+  // Find unit price - but exclude columns with "sem ipi" or "x preco"
+  let unitPriceIndex = -1;
+  const priceAliases = ["preco_unitario", "preco_unit", "valor_unitario", "valor_unit", "unit_price", "vl._unitario", "vl_unitario", "preco_liq"];
+  for (let i = 0; i < table.headers.length; i++) {
+    const norm = normalizeHeader(table.headers[i]);
+    if (norm.includes("sem_ipi") || norm.includes("qtde_x") || norm.includes("x_preco")) continue;
+    if (priceAliases.includes(norm) || priceAliases.some((a) => norm.startsWith(a))) {
+      unitPriceIndex = i;
+      break;
+    }
+  }
   const totalIndex = findHeaderIndex(table.headers, ["valor_total", "preco_total", "total", "vl._total", "vl_total"]);
 
   if ((skuIndex < 0 && descriptionIndex < 0) || unitPriceIndex < 0) {
@@ -1022,10 +1050,16 @@ function findHeaderIndex(headers: string[], aliases: string[]) {
   // Try exact match first
   const exact = headers.findIndex((header) => aliases.includes(normalizeHeader(header)));
   if (exact >= 0) return exact;
-  // Try partial match (header contains alias or alias contains header)
+  // Try starts-with match (header starts with an alias — safer than substring)
+  const startsWith = headers.findIndex((header) => {
+    const normalized = normalizeHeader(header);
+    return aliases.some((alias) => normalized.startsWith(alias));
+  });
+  if (startsWith >= 0) return startsWith;
+  // Try contains match as last resort
   return headers.findIndex((header) => {
     const normalized = normalizeHeader(header);
-    return aliases.some((alias) => normalized.includes(alias) || alias.includes(normalized));
+    return aliases.some((alias) => normalized.includes(alias));
   });
 }
 
@@ -1651,6 +1685,39 @@ function extractPdfQuoteDate(lines: string[]): string | null {
     if (m) return m[1];
   }
   return null;
+}
+
+/** Match ONLY by code (ref.fornecedor = supplier SKU). No fuzzy matching. */
+function quoteMatchesItemByCode(quote: SupplierQuoteRow, item: RequestedItem): boolean {
+  const quoteSku = normalizeComparable(quote.sku);
+  if (!quoteSku) return false;
+
+  // Check ref.fornecedor from Flex against supplier SKU
+  if (item.supplierRef) {
+    const itemRef = normalizeComparable(item.supplierRef);
+    if (itemRef && quoteSku === itemRef) return true;
+    // Prefix stripping (W, WB, WBB)
+    if (itemRef) {
+      if (itemRef.endsWith(quoteSku) || quoteSku.endsWith(itemRef)) return true;
+      for (const prefix of ["w", "wb", "wbb"]) {
+        if (itemRef.startsWith(prefix) && itemRef.slice(prefix.length) === quoteSku) return true;
+        if (quoteSku.startsWith(prefix) && quoteSku.slice(prefix.length) === itemRef) return true;
+      }
+    }
+  }
+
+  // Check alternativeRef
+  if (quote.alternativeRef && item.supplierRef) {
+    const altRef = normalizeComparable(quote.alternativeRef);
+    const itemRef = normalizeComparable(item.supplierRef);
+    if (altRef && itemRef && (altRef === itemRef || itemRef.endsWith(altRef) || altRef.endsWith(itemRef))) return true;
+  }
+
+  // Direct SKU match
+  const itemSku = normalizeComparable(item.sku);
+  if (itemSku && quoteSku === itemSku) return true;
+
+  return false;
 }
 
 /**
