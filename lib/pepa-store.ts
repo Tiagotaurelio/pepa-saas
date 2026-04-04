@@ -541,19 +541,49 @@ function normalizeDescription(value: string): string {
  * A rolo typically contains the meters specified in the description (e.g., "100M").
  * Conversion: price_per_RL / meters_per_roll = price_per_MT
  */
+/**
+ * Extract pieces-per-pack from a Flex description.
+ * Matches patterns like "50PC", "100 PC", "50PCS", "100 PÇS", "50 PECAS", "200 PEÇAS".
+ */
+function extractPiecesPerPack(description: string): number | null {
+  const pcsMatch = description.match(/(\d+)\s*(?:PC|PCS|PÇS?|PECAS?|PEÇAS?)\b/i);
+  return pcsMatch ? parseInt(pcsMatch[1], 10) : null;
+}
+
 function convertSupplierPriceToFlexUnit(
   supplierUnitPrice: number,
   supplierUnit: string | undefined,
   flexUnit: string,
   flexDescription: string,
   supplierQty: number | undefined,
-  flexQty: number
+  flexQty: number,
+  flexBaseUnitPrice?: number
 ): { convertedPrice: number; convertedQty: number | null } {
   const sUnit = (supplierUnit ?? "").toUpperCase();
   const fUnit = flexUnit.toUpperCase();
 
+  const isFlexUnitSingle = ["UN", "UND", "UNID", "PC", "PCA"].includes(fUnit);
+  const isSupplierUnitSingle = ["UN", "UND", "UNID", "PC", "PCA"].includes(sUnit);
+  const isSupplierUnitPack = ["CT", "CX", "PCT", "KIT"].includes(sUnit);
+  const isFlexUnitPack = ["CT", "CX", "PCT"].includes(fUnit);
+  const piecesPerPack = extractPiecesPerPack(flexDescription);
+
   // No conversion needed if units match or supplier unit unknown
   if (!sUnit || sUnit === fUnit) {
+    // SPECIAL CASE: units match (both "UN") but description says e.g. "50PC" and
+    // the supplier price is much higher than flex unit price — supplier likely quoted
+    // per pack/box but parser assumed "UN". Convert by dividing by pieces per pack.
+    if (sUnit === fUnit && isFlexUnitSingle && piecesPerPack && piecesPerPack > 1 && flexBaseUnitPrice != null && flexBaseUnitPrice > 0) {
+      // If supplier price is significantly higher than flex unit price (more than 3× the
+      // pack size threshold), the supplier is almost certainly quoting per pack.
+      // e.g., flex=1.32/UN, supplier=143/UN, desc has "50PC" → 143/50=2.86/UN
+      if (supplierUnitPrice > flexBaseUnitPrice * (piecesPerPack * 0.4)) {
+        return {
+          convertedPrice: roundCurrency(supplierUnitPrice / piecesPerPack),
+          convertedQty: supplierQty != null ? supplierQty * piecesPerPack : null
+        };
+      }
+    }
     return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
   }
 
@@ -582,31 +612,22 @@ function convertSupplierPriceToFlexUnit(
   }
 
   // CT/CX/PCT → UN conversion: supplier sells per box/pack, Flex counts per unit
-  // Extract pieces per pack from Flex description (e.g., "50PC", "100PC", "200PC")
-  if ((sUnit === "CT" || sUnit === "CX" || sUnit === "PCT" || sUnit === "KIT") && (fUnit === "UN" || fUnit === "UND" || fUnit === "UNID" || fUnit === "PC" || fUnit === "PCA")) {
-    const pcsMatch = flexDescription.match(/(\d+)\s*PC\b/i);
-    if (pcsMatch) {
-      const piecesPerPack = parseInt(pcsMatch[1], 10);
-      if (piecesPerPack > 0) {
-        return {
-          convertedPrice: roundCurrency(supplierUnitPrice / piecesPerPack),
-          convertedQty: supplierQty != null ? supplierQty * piecesPerPack : null
-        };
-      }
+  if (isSupplierUnitPack && isFlexUnitSingle) {
+    if (piecesPerPack && piecesPerPack > 0) {
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice / piecesPerPack),
+        convertedQty: supplierQty != null ? supplierQty * piecesPerPack : null
+      };
     }
   }
 
   // UN → CT/CX conversion (reverse): Flex counts per pack, supplier sells per unit
-  if ((fUnit === "CT" || fUnit === "CX" || fUnit === "PCT") && (sUnit === "UN" || sUnit === "UND" || sUnit === "UNID" || sUnit === "PC")) {
-    const pcsMatch = flexDescription.match(/(\d+)\s*PC\b/i);
-    if (pcsMatch) {
-      const piecesPerPack = parseInt(pcsMatch[1], 10);
-      if (piecesPerPack > 0) {
-        return {
-          convertedPrice: roundCurrency(supplierUnitPrice * piecesPerPack),
-          convertedQty: supplierQty != null ? Math.round(supplierQty / piecesPerPack) : null
-        };
-      }
+  if (isFlexUnitPack && isSupplierUnitSingle) {
+    if (piecesPerPack && piecesPerPack > 0) {
+      return {
+        convertedPrice: roundCurrency(supplierUnitPrice * piecesPerPack),
+        convertedQty: supplierQty != null ? Math.round(supplierQty / piecesPerPack) : null
+      };
     }
   }
 
@@ -622,8 +643,6 @@ function convertSupplierPriceToFlexUnit(
     }
     const reverseRatio = supplierQty / flexQty;
     if (reverseRatio > 1 && Number.isInteger(reverseRatio)) {
-      // Supplier sends in smaller packs (CT), Flex counts bigger packs (CX)
-      // e.g., Flex 20 CX, Supplier 40 CT → 1 CX = 2 CT → price per CX = price * 2
       return {
         convertedPrice: roundCurrency(supplierUnitPrice * reverseRatio),
         convertedQty: Math.round(supplierQty / reverseRatio)
@@ -646,7 +665,7 @@ function buildComparisonRows(
           .filter((quote) => quoteMatchesItemByCode(quote, item))
           .map((quote) => {
             const { convertedPrice, convertedQty } = convertSupplierPriceToFlexUnit(
-              quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity
+              quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity, item.baseUnitPrice
             );
             return { supplierName: file.supplierName,
               quote: { ...quote, unitPrice: convertedPrice, quotedQuantity: convertedQty ?? quote.quotedQuantity }
@@ -663,7 +682,7 @@ function buildComparisonRows(
             .filter((quote) => quoteMatchesItem(quote, item))
             .map((quote) => {
               const { convertedPrice, convertedQty } = convertSupplierPriceToFlexUnit(
-                quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity
+                quote.unitPrice, quote.unit, item.unit, item.description, quote.quotedQuantity, item.requestedQuantity, item.baseUnitPrice
               );
               return { supplierName: file.supplierName,
                 quote: { ...quote, unitPrice: convertedPrice, quotedQuantity: convertedQty ?? quote.quotedQuantity } };
