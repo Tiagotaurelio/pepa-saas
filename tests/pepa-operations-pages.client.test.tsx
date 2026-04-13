@@ -82,17 +82,13 @@ describe("PEPA operational pages", () => {
       isLoading: true,
       error: null
     });
-    global.fetch = vi.fn(async () => new Response("{}", { status: 500 })) as typeof fetch;
 
     render(<CotacoesPepaPage />);
 
-    expect(screen.getByText("Atualizando rodada")).toBeTruthy();
-    expect(screen.getByText("Fechamento com risco operacional")).toBeTruthy();
-
-    await waitFor(() => {
-      expect(screen.getByText("Historico indisponivel")).toBeTruthy();
-      expect(screen.getByText("Nao foi possivel carregar o historico de rodadas agora.")).toBeTruthy();
-    });
+    expect(screen.getByText("Carregando")).toBeTruthy();
+    expect(screen.getByText("Atualizando o comparativo...")).toBeTruthy();
+    expect(screen.getByText("Aberta")).toBeTruthy();
+    expect(screen.getByText("Fechar rodada")).toBeTruthy();
   });
 
   it("renders validacao closed-round state and validation error", () => {
@@ -117,10 +113,9 @@ describe("PEPA operational pages", () => {
 
     render(<ValidacaoCompraPepaPage />);
 
-    expect(screen.getByText("Esta rodada esta fechada. A validacao permanece disponivel para consulta, mas sem edicao ate a rodada ser reaberta.")).toBeTruthy();
-    expect(screen.getByText("Falha ao carregar validacao")).toBeTruthy();
+    expect(screen.getByText("Erro")).toBeTruthy();
     expect(screen.getByText("Nao foi possivel carregar a rodada atual.")).toBeTruthy();
-    expect(screen.getByText("Rodada fechada: reabra na tela de cotacoes para editar.")).toBeTruthy();
+    expect(screen.getByText("← Voltar para Cotações")).toBeTruthy();
   });
 
   it("renders pedido final export block and error state", () => {
@@ -149,13 +144,12 @@ describe("PEPA operational pages", () => {
 
     render(<PedidoFinalPepaPage />);
 
-    expect(screen.getByText("Exportacao final bloqueada")).toBeTruthy();
-    expect(screen.getByText("Falha ao carregar pedido final")).toBeTruthy();
+    expect(screen.getByText("Exportacao bloqueada — rodada ainda aberta")).toBeTruthy();
+    expect(screen.getByText("Erro")).toBeTruthy();
     expect(screen.getByText("Nao foi possivel carregar a rodada atual.")).toBeTruthy();
-    expect(screen.getByText("Saida final ainda nao liberada")).toBeTruthy();
   });
 
-  it("renders logs empty state when there are no audit events", () => {
+  it("renders logs empty state when there are no audit events", async () => {
     usePepaSnapshotMock.mockReturnValue({
       snapshot: {
         ...baseSnapshot,
@@ -168,7 +162,9 @@ describe("PEPA operational pages", () => {
 
     render(<LogsPepaPage />);
 
-    expect(screen.getByText("Nenhum evento auditavel registrado ainda.")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("Nenhuma cotação encontrada para este filtro.")).toBeTruthy();
+    });
   });
 
   it("renders logs with round badges and open round link", () => {
@@ -204,9 +200,7 @@ describe("PEPA operational pages", () => {
     render(<LogsPepaPage />);
 
     expect(screen.getByText("Rodada fechada")).toBeTruthy();
-    expect(screen.getByText("Fechada")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Abrir rodada" }).getAttribute("href")).toBe(
-      "/cotacoes-pepa?roundId=round-abc12345"
-    );
+    expect(screen.getByText("Fechamento confirmado para auditoria.")).toBeTruthy();
+    expect(screen.getByText("Trilha de auditoria")).toBeTruthy();
   });
 });

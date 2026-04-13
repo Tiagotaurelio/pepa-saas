@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import path from "node:path";
 
 import Database from "better-sqlite3";
@@ -65,6 +65,28 @@ function getPepaDataDirectory() {
   return process.env.PEPA_DATA_DIR?.trim() || path.join(process.cwd(), "data");
 }
 
+function backupSqlite(dataDirectory: string) {
+  const dbPath = path.join(dataDirectory, "pepa.db");
+  if (!existsSync(dbPath)) return;
+
+  const backupDir = path.join(dataDirectory, "backups");
+  mkdirSync(backupDir, { recursive: true });
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const backupPath = path.join(backupDir, `pepa-${timestamp}.db`);
+  copyFileSync(dbPath, backupPath);
+
+  // Retain last 10 backups
+  const backups = readdirSync(backupDir)
+    .filter((f) => f.startsWith("pepa-") && f.endsWith(".db"))
+    .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+
+  for (const old of backups.slice(10)) {
+    unlinkSync(path.join(backupDir, old.name));
+  }
+}
+
 function getSqlite() {
   if (sqliteDb) {
     return sqliteDb;
@@ -73,6 +95,7 @@ function getSqlite() {
   const dataDirectory = getPepaDataDirectory();
   const sqlitePath = path.join(dataDirectory, "pepa.db");
   mkdirSync(dataDirectory, { recursive: true });
+  backupSqlite(dataDirectory);
   sqliteDb = new Database(sqlitePath);
   sqliteDb.pragma("journal_mode = WAL");
   initializeSqliteSchema(sqliteDb);
