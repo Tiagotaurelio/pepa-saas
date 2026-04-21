@@ -48,7 +48,10 @@ export async function POST(request: NextRequest) {
   }
 
   function buildFileUrl(storageKey: string) {
-    const segments = storageKey.replace(/^[^/]+\//, "");
+    const prefix = process.env.PEPA_OBJECT_STORAGE_PREFIX?.trim();
+    const segments = prefix
+      ? storageKey.replace(new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/?`), "")
+      : storageKey;
     return `${baseUrl}/api/pepa/n8n-file/${segments}`;
   }
 
