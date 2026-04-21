@@ -35,17 +35,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: Record<string, unknown>;
+  const url = new URL(request.url);
+
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const existingRoundId = body.roundId as string | undefined;
-  const tenantId = (body.tenantId as string | undefined) ?? defaultTenantId;
+  // Normalise body: N8N may send [{ data: [...] }], { data: [...] }, { items: [...] }, or a flat array
+  let bodyObj: Record<string, unknown>;
+  if (Array.isArray(body)) {
+    // [{ data: [...], roundId?, tenantId? }] or flat array of items
+    const first = body[0] as Record<string, unknown> | undefined;
+    if (first && (Array.isArray(first.data) || Array.isArray(first.items))) {
+      bodyObj = first;
+    } else {
+      bodyObj = { items: body };
+    }
+  } else {
+    bodyObj = body as Record<string, unknown>;
+  }
 
-  const rawItems = body.items ?? body.data ?? body;
+  // roundId / tenantId: query param takes precedence over body
+  const existingRoundId =
+    (url.searchParams.get("roundId") || undefined) ??
+    (bodyObj.roundId as string | undefined);
+  const tenantId =
+    url.searchParams.get("tenantId") ||
+    (bodyObj.tenantId as string | undefined) ||
+    defaultTenantId;
+
+  const rawItems = bodyObj.items ?? bodyObj.data ?? bodyObj;
   let items: N8NItem[];
   if (Array.isArray(rawItems)) {
     items = rawItems;
