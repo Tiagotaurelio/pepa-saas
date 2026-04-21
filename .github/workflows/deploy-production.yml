@@ -50,6 +50,10 @@ jobs:
             PEPA_OBJECT_STORAGE_FORCE_PATH_STYLE=${{ secrets.PEPA_OBJECT_STORAGE_FORCE_PATH_STYLE }}
             PEPA_OBJECT_STORAGE_PREFIX=${{ secrets.PEPA_OBJECT_STORAGE_PREFIX }}
             PEPA_OBJECT_STORAGE_MIRROR_LOCAL=${{ secrets.PEPA_OBJECT_STORAGE_MIRROR_LOCAL }}
+            PEPA_N8N_TOKEN=${{ secrets.PEPA_N8N_TOKEN }}
+            PEPA_N8N_WEBHOOK_URL=${{ secrets.PEPA_N8N_WEBHOOK_URL }}
+            PEPA_N8N_TENANT_ID=${{ secrets.PEPA_N8N_TENANT_ID }}
+            PEPA_PUBLIC_DOMAIN=${{ secrets.PEPA_PUBLIC_DOMAIN }}
             EOF
             cd "$DEPLOY_PATH"
             docker build -t pepa-saas:latest .
