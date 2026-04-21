@@ -33,6 +33,8 @@ export default function CotacoesPepaPage() {
   const [adjustedDesc, setAdjustedDesc] = useState("");
   const [divergenceFilter, setDivergenceFilter] = useState<"all" | "price" | "quantity" | "description">("all");
   const [isAcceptingAll, setIsAcceptingAll] = useState(false);
+  const [isProcessingAI, setIsProcessingAI] = useState(false);
+  const [aiMessage, setAiMessage] = useState<{ tone: "success" | "error" | "info"; text: string } | null>(null);
 
   useEffect(() => {
     const handleAuthExpired = () => {
@@ -109,6 +111,39 @@ export default function CotacoesPepaPage() {
     if (supplierInputRef.current) supplierInputRef.current.value = "";
     window.dispatchEvent(new Event("pepa-store-updated"));
     setIsSubmitting(false);
+  }
+
+  async function handleProcessWithAI() {
+    if (!snapshot.latestRound) return;
+    setIsProcessingAI(true);
+    setAiMessage({ tone: "info", text: "Enviando para processamento com IA... Aguarde até 60 segundos." });
+
+    const response = await fetch("/api/pepa/n8n-trigger", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roundId: snapshot.latestRound.id }),
+    });
+
+    if (response.status === 401) {
+      setIsProcessingAI(false);
+      window.setTimeout(() => window.location.assign("/login"), 150);
+      return;
+    }
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setAiMessage({ tone: "error", text: payload.error ?? "Erro ao acionar a IA." });
+      setIsProcessingAI(false);
+      return;
+    }
+
+    setAiMessage({ tone: "info", text: "IA processando os arquivos... Os dados serão atualizados em instantes." });
+
+    await new Promise((resolve) => setTimeout(resolve, 40000));
+    window.dispatchEvent(new Event("pepa-store-updated"));
+    setAiMessage({ tone: "success", text: "Dados extraídos pela IA carregados com sucesso." });
+    setIsProcessingAI(false);
   }
 
   async function handleRoundStatusChange(nextStatus: "open" | "closed") {
@@ -206,6 +241,16 @@ export default function CotacoesPepaPage() {
             {isSubmitting ? "Salvando..." : "Salvar rodada"}
           </button>
 
+          {snapshot.latestRound && !isClosedRound && (
+            <button
+              className="rounded-full bg-violet-600 px-5 py-2.5 text-sm font-medium text-white disabled:opacity-50"
+              disabled={isProcessingAI || isSubmitting}
+              onClick={handleProcessWithAI}
+            >
+              {isProcessingAI ? "Processando com IA..." : "✦ Processar com IA"}
+            </button>
+          )}
+
           {snapshot.latestRound && (
             <>
               <span className="text-sm text-slate-500">
@@ -242,6 +287,15 @@ export default function CotacoesPepaPage() {
               tone={roundStatusMessage.tone}
               title="Status da rodada"
               message={roundStatusMessage.text}
+            />
+          </div>
+        )}
+        {aiMessage && (
+          <div className="mt-4">
+            <OperationFeedback
+              tone={aiMessage.tone}
+              title={aiMessage.tone === "success" ? "IA concluída" : aiMessage.tone === "error" ? "Erro na IA" : "Processando com IA"}
+              message={aiMessage.text}
             />
           </div>
         )}

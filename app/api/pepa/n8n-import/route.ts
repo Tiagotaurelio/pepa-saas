@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
-import { savePepaSnapshot } from "@/lib/db";
+import { savePepaSnapshot, updatePepaSnapshot, loadPepaSnapshotByRoundId } from "@/lib/db";
 import type {
   ComparisonOffer,
   ComparisonRow,
@@ -28,27 +28,27 @@ function roundCurrency(value: number): number {
 
 export async function POST(request: NextRequest) {
   const token = process.env.PEPA_N8N_TOKEN;
-  const tenantId = process.env.PEPA_N8N_TENANT_ID ?? "tenant-demo";
+  const defaultTenantId = process.env.PEPA_N8N_TENANT_ID ?? "tenant-demo";
 
   const authHeader = request.headers.get("Authorization");
   if (!token || authHeader !== `Bearer ${token}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: unknown;
+  let body: Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const existingRoundId = body.roundId as string | undefined;
+  const tenantId = (body.tenantId as string | undefined) ?? defaultTenantId;
+
+  const rawItems = body.items ?? body.data ?? body;
   let items: N8NItem[];
-  if (Array.isArray(body)) {
-    items = body;
-  } else if (Array.isArray((body as Record<string, unknown>)?.data)) {
-    items = (body as { data: N8NItem[] }).data;
-  } else if (Array.isArray((body as Record<string, unknown>)?.items)) {
-    items = (body as { items: N8NItem[] }).items;
+  if (Array.isArray(rawItems)) {
+    items = rawItems;
   } else {
     return NextResponse.json({ error: "Expected array of items" }, { status: 400 });
   }
@@ -117,17 +117,51 @@ export async function POST(request: NextRequest) {
 
   const quotedItems = comparisonRows.filter((r) => r.itemStatus === "quoted").length;
   const quotedValue = roundCurrency(comparisonRows.reduce((sum, r) => sum + (r.bestTotal ?? 0), 0));
-  const roundId = randomUUID();
   const createdAt = new Date().toISOString();
 
   const auditEvent: PepaAuditEvent = {
     id: randomUUID(),
     type: "round_uploaded",
-    title: "Rodada importada via N8N",
-    description: `${items.length} itens importados automaticamente pelo fluxo N8N.`,
+    title: "Dados enriquecidos via IA (N8N)",
+    description: `${items.length} itens extraídos automaticamente pelo GPT-4o.`,
     occurredAt: createdAt,
   };
 
+  if (existingRoundId) {
+    const existing = await loadPepaSnapshotByRoundId(tenantId, existingRoundId);
+    const updatedSnapshot: PepaSnapshot = {
+      latestRound: {
+        ...(existing?.latestRound ?? {
+          id: existingRoundId,
+          createdAt,
+          mirrorFileName: "n8n-import",
+          supplierFilesCount: supplierMap.size,
+        }),
+        requestedItemsCount: items.length,
+        quotedItems,
+        coverageRate: Math.round((quotedItems / items.length) * 100),
+        status: "open",
+      },
+      attachments: existing?.attachments ?? [],
+      suppliers,
+      comparisonRows,
+      auditEvents: [...(existing?.auditEvents ?? []), auditEvent],
+      totals: {
+        attachmentsReceived: existing?.totals?.attachmentsReceived ?? supplierMap.size + 1,
+        parsedAttachments: supplierMap.size + 1,
+        ocrQueue: 0,
+        requestedItems: items.length,
+        quotedItems,
+        coverageRate: Math.round((quotedItems / items.length) * 100),
+        quotedValue,
+      },
+    };
+
+    await updatePepaSnapshot({ roundId: existingRoundId, tenantId, snapshot: updatedSnapshot });
+    return NextResponse.json({ ok: true, roundId: existingRoundId, quotedItems, totalItems: items.length });
+  }
+
+  const roundId = randomUUID();
   const snapshot: PepaSnapshot = {
     latestRound: {
       id: roundId,
@@ -155,14 +189,6 @@ export async function POST(request: NextRequest) {
     },
   };
 
-  await savePepaSnapshot({
-    id: roundId,
-    tenantId,
-    createdAt,
-    mirrorFileName: "n8n-import",
-    supplierFilesCount: supplierMap.size,
-    snapshot,
-  });
-
+  await savePepaSnapshot({ id: roundId, tenantId, createdAt, mirrorFileName: "n8n-import", supplierFilesCount: supplierMap.size, snapshot });
   return NextResponse.json({ ok: true, roundId, quotedItems, totalItems: items.length });
 }
