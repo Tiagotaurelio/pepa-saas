@@ -44,10 +44,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Normalise body: N8N may send [{ data: [...] }], { data: [...] }, { items: [...] }, or a flat array
+  // Normalise body: handle every format N8N may send
+  // - [{ data: [...] }]  → wrapped array (N8N default output)
+  // - [item1, item2, ...] → flat array
+  // - { data: [...] }    → object with data key
+  // - { items: [...] }   → object with items key
+  // - { sku_pepa, ... }  → single flat item (N8N iterating per-item)
   let bodyObj: Record<string, unknown>;
   if (Array.isArray(body)) {
-    // [{ data: [...], roundId?, tenantId? }] or flat array of items
     const first = body[0] as Record<string, unknown> | undefined;
     if (first && (Array.isArray(first.data) || Array.isArray(first.items))) {
       bodyObj = first;
@@ -67,7 +71,15 @@ export async function POST(request: NextRequest) {
     (bodyObj.tenantId as string | undefined) ||
     defaultTenantId;
 
-  const rawItems = bodyObj.items ?? bodyObj.data ?? bodyObj;
+  let rawItems: unknown = bodyObj.items ?? bodyObj.data;
+  if (rawItems === undefined) {
+    // Single flat item or unknown object — if it has known item fields, wrap it
+    if (bodyObj.sku_pepa !== undefined || bodyObj.item !== undefined || bodyObj.fornecedor !== undefined) {
+      rawItems = [bodyObj];
+    } else {
+      rawItems = bodyObj;
+    }
+  }
   let items: N8NItem[];
   if (Array.isArray(rawItems)) {
     items = rawItems;
