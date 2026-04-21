@@ -138,12 +138,34 @@ export default function CotacoesPepaPage() {
       return;
     }
 
-    setAiMessage({ tone: "info", text: "IA processando os arquivos... Os dados serão atualizados em instantes." });
+    setAiMessage({ tone: "info", text: "IA processando os arquivos... Atualizando automaticamente." });
 
-    await new Promise((resolve) => setTimeout(resolve, 40000));
-    window.dispatchEvent(new Event("pepa-store-updated"));
-    setAiMessage({ tone: "success", text: "Dados extraídos pela IA carregados com sucesso." });
-    setIsProcessingAI(false);
+    const uploadedRoundId = snapshot.latestRound.id;
+    const deadline = Date.now() + 120_000;
+    let found = false;
+
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      try {
+        const check = await fetch("/api/pepa/snapshot", { cache: "no-store", credentials: "same-origin" });
+        if (check.ok) {
+          const data = await check.json() as { snapshot: { latestRound?: { id: string; quotedItems: number } } };
+          const latest = data.snapshot?.latestRound;
+          if (latest && latest.quotedItems > 0 && latest.id !== uploadedRoundId) {
+            found = true;
+            break;
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (found) {
+      window.location.assign("/cotacoes-pepa");
+    } else {
+      window.dispatchEvent(new Event("pepa-store-updated"));
+      setAiMessage({ tone: "info", text: "Processamento concluído. Verifique os dados na tabela." });
+      setIsProcessingAI(false);
+    }
   }
 
   async function handleRoundStatusChange(nextStatus: "open" | "closed") {
