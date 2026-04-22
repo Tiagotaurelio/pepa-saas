@@ -141,6 +141,7 @@ export default function CotacoesPepaPage() {
     setAiMessage({ tone: "info", text: "IA processando os arquivos... Atualizando automaticamente." });
 
     const uploadedRoundId = snapshot.latestRound.id;
+    const initialQuotedItems = snapshot.latestRound.quotedItems ?? 0;
     const deadline = Date.now() + 120_000;
     let found = false;
 
@@ -151,7 +152,9 @@ export default function CotacoesPepaPage() {
         if (check.ok) {
           const data = await check.json() as { snapshot: { latestRound?: { id: string; quotedItems: number } } };
           const latest = data.snapshot?.latestRound;
-          if (latest && latest.quotedItems > 0 && latest.id !== uploadedRoundId) {
+          const isNewRound = latest && latest.id !== uploadedRoundId && latest.quotedItems > 0;
+          const isSameRoundUpdated = latest && latest.id === uploadedRoundId && latest.quotedItems > initialQuotedItems;
+          if (isNewRound || isSameRoundUpdated) {
             found = true;
             break;
           }
