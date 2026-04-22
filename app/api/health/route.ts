@@ -7,6 +7,7 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     app: "pepa-saas",
+    version: "2026-04-22-v4",
     storage: getPepaStorageMode(),
     timestamp: new Date().toISOString()
   });
