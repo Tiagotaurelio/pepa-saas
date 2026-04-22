@@ -89,7 +89,16 @@ export async function POST(request: NextRequest) {
   }
 
   const firstItem = rawItems[0] as Record<string, unknown>;
-  const SUPPLIER_PRICE_FIELDS = ["preco_unitario", "preco_unit", "preco", "price", "unit_price", "valor_unitario"];
+
+  // Normalize field name: lowercase, strip accents, strip separators
+  // Handles GPT returning "código" instead of "codigo", "preco_unitário" vs "preco_unitario", etc.
+  function normalizeFieldName(key: string): string {
+    return key
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[_\s\-\.]/g, "");
+  }
 
   // Log exact payload for debugging
   console.error("[n8n-import] firstItem keys:", Object.keys(firstItem));
@@ -101,27 +110,30 @@ export async function POST(request: NextRequest) {
   const isSupplierOnly = !hasRealSkuPepa;
   console.error("[n8n-import] skuPepaValue:", skuPepaValue, "isSupplierOnly:", isSupplierOnly);
 
-  // Extract code from various field names GPT may use
+  const SUPPLIER_PRICE_FIELDS_NORM = ["precounitario", "precounit", "preco", "price", "unitprice", "valorunitario"];
+
+  // Extract code — compares normalized field names so "código" matches "codigo"
   function extractCode(item: Record<string, unknown>): string {
-    const CODE_FIELDS = ["codigo", "produto", "ref", "sku", "code", "item_code", "product_code", "cod", "referencia"];
-    for (const f of CODE_FIELDS) {
-      if (item[f] != null) return String(item[f]);
+    const CODE_FIELDS_NORM = ["codigo", "produto", "ref", "sku", "code", "itemcode", "productcode", "cod", "referencia"];
+    for (const key of Object.keys(item)) {
+      if (item[key] != null && CODE_FIELDS_NORM.includes(normalizeFieldName(key))) {
+        return String(item[key]);
+      }
     }
     return "";
   }
 
-  // Extract unit price from various field names GPT may use
+  // Extract unit price — handles accented field names + fuzzy fallback
   function extractPrice(item: Record<string, unknown>): number | null {
-    // Try known field names first
-    for (const f of SUPPLIER_PRICE_FIELDS) {
-      if (item[f] != null) {
-        const v = Number(item[f]);
+    for (const key of Object.keys(item)) {
+      if (item[key] != null && SUPPLIER_PRICE_FIELDS_NORM.includes(normalizeFieldName(key))) {
+        const v = Number(item[key]);
         if (!isNaN(v) && v > 0) return v;
       }
     }
-    // Fallback: any field whose name contains "preco"/"price"/"valor" and "unit"/"unit"
+    // Fallback: any field containing "preco"/"price"/"valor" + "unit"/"unitario" (accent-stripped)
     for (const key of Object.keys(item)) {
-      const k = key.toLowerCase().replace(/[_\s]/g, "");
+      const k = normalizeFieldName(key);
       if ((k.includes("preco") || k.includes("price") || k.includes("valor")) && (k.includes("unit") || k.includes("unitario"))) {
         const v = Number(item[key]);
         if (!isNaN(v) && v > 0) return v;
@@ -130,20 +142,24 @@ export async function POST(request: NextRequest) {
     return null;
   }
 
-  // Extract supplier name from various field names
+  // Extract supplier name — handles accented variants
   function extractSupplierName(item: Record<string, unknown>): string {
-    const NAME_FIELDS = ["nome_fornecedor", "fornecedor", "supplier", "empresa", "supplier_name"];
-    for (const f of NAME_FIELDS) {
-      if (item[f]) return String(item[f]);
+    const NAME_FIELDS_NORM = ["nomefornecedor", "fornecedor", "supplier", "empresa", "suppliername"];
+    for (const key of Object.keys(item)) {
+      if (item[key] && NAME_FIELDS_NORM.includes(normalizeFieldName(key))) {
+        return String(item[key]);
+      }
     }
     return "Fornecedor";
   }
 
   // Extract unit from various field names
   function extractUnit(item: Record<string, unknown>): string {
-    const UNIT_FIELDS = ["unidade", "un", "unit", "und"];
-    for (const f of UNIT_FIELDS) {
-      if (item[f]) return String(item[f]);
+    const UNIT_FIELDS_NORM = ["unidade", "un", "unit", "und"];
+    for (const key of Object.keys(item)) {
+      if (item[key] && UNIT_FIELDS_NORM.includes(normalizeFieldName(key))) {
+        return String(item[key]);
+      }
     }
     return "";
   }
