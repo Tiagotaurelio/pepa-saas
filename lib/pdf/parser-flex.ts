@@ -177,11 +177,14 @@ function parseFlexLineMode(lines: string[]): ExtractedPdfItem[] {
     const unit = isUnit ? unitCandidate.toUpperCase() : "UN";
     const endIdx = isUnit ? tokens.length - 2 : tokens.length - 1;
 
-    // Token before unit = supplier reference (alphanumeric, not pure digits)
+    // Token before unit = supplier reference
+    // Accepts alphanumeric refs (W0106AZ) AND short numeric refs (11, 5, 4863, 17554)
+    // Pure numeric refs are accepted only if ≤6 digits (supplier product codes, not long dimension specs)
     const refCandidate = tokens[endIdx - 1] ?? "";
-    const isRef = refCandidate.length >= 2 &&
+    const isPureNumeric = /^\d+$/.test(refCandidate);
+    const isRef = refCandidate.length >= 1 &&
       /^[A-Z0-9][A-Z0-9._-]*$/i.test(refCandidate) &&
-      !/^\d+$/.test(refCandidate);
+      (!isPureNumeric || refCandidate.length <= 6);
     const supplierRef = isRef ? refCandidate : undefined;
     const descEnd = isRef ? endIdx - 1 : endIdx;
 
