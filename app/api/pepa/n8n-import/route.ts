@@ -89,12 +89,10 @@ export async function POST(request: NextRequest) {
   }
 
   const firstItem = rawItems[0] as Record<string, unknown>;
-
-  const FLEX_FIELDS = ["sku_pepa", "sku_forn", "item", "qtd_pedida"];
   const SUPPLIER_PRICE_FIELDS = ["preco_unitario", "preco_unit", "preco", "price", "unit_price", "valor_unitario"];
-  const hasFlexField = FLEX_FIELDS.some((f) => f in firstItem);
-  // Supplier-only: no flex fields AND we have a roundId to load existing data from
-  const isSupplierOnly = !hasFlexField && !!existingRoundId;
+
+  // sku_pepa is unique to PEPA's internal format — GPT will never use this field name
+  const isSupplierOnly = !("sku_pepa" in firstItem);
 
   // Extract code from various field names GPT may use
   function extractCode(item: Record<string, unknown>): string {
