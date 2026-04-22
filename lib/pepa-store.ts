@@ -1266,7 +1266,10 @@ function looksLikeAddressOrMeta(value: string): boolean {
 }
 
 function sanitizeFileName(fileName: string) {
-  return fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safe = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const dot = safe.lastIndexOf(".");
+  if (dot === -1) return safe;
+  return safe.slice(0, dot) + safe.slice(dot).toLowerCase();
 }
 
 function isStructuredTextFile(fileName: string, mimeType: string) {
