@@ -106,11 +106,13 @@ export async function POST(request: NextRequest) {
   console.log("[n8n-import] rawItems.length:", (rawItems as unknown[]).length);
   console.log("[n8n-import] existingRoundId:", existingRoundId);
 
-  // sku_pepa must have a real non-empty value — old N8N code may set sku_pepa: undefined
+  // sku_pepa must look like a real PEPA SKU (numeric 1-6 digits, e.g. "24804")
+  // Values like "sem_id", "undefined", "", or any non-numeric string = supplier-only format
   const skuPepaValue = firstItem["sku_pepa"];
-  const hasRealSkuPepa = skuPepaValue !== undefined && skuPepaValue !== null && String(skuPepaValue).trim() !== "" && String(skuPepaValue) !== "undefined";
+  const skuPepaStr = String(skuPepaValue ?? "").trim();
+  const hasRealSkuPepa = skuPepaStr !== "" && skuPepaStr !== "undefined" && /^\d{1,8}$/.test(skuPepaStr);
   const isSupplierOnly = !hasRealSkuPepa;
-  console.log("[n8n-import] skuPepaValue:", skuPepaValue, "| isSupplierOnly:", isSupplierOnly);
+  console.log("[n8n-import] skuPepaValue:", skuPepaValue, "skuPepaStr:", skuPepaStr, "| isSupplierOnly:", isSupplierOnly);
 
   const SUPPLIER_PRICE_FIELDS_NORM = ["precounitario", "precounit", "preco", "price", "unitprice", "valorunitario"];
 
