@@ -91,8 +91,15 @@ export async function POST(request: NextRequest) {
   const firstItem = rawItems[0] as Record<string, unknown>;
   const SUPPLIER_PRICE_FIELDS = ["preco_unitario", "preco_unit", "preco", "price", "unit_price", "valor_unitario"];
 
-  // sku_pepa is unique to PEPA's internal format — GPT will never use this field name
-  const isSupplierOnly = !("sku_pepa" in firstItem);
+  // Log exact payload for debugging
+  console.error("[n8n-import] firstItem keys:", Object.keys(firstItem));
+  console.error("[n8n-import] firstItem:", JSON.stringify(firstItem));
+
+  // sku_pepa must have a real non-empty value — old N8N code may set sku_pepa: undefined
+  const skuPepaValue = firstItem["sku_pepa"];
+  const hasRealSkuPepa = skuPepaValue !== undefined && skuPepaValue !== null && String(skuPepaValue).trim() !== "" && String(skuPepaValue) !== "undefined";
+  const isSupplierOnly = !hasRealSkuPepa;
+  console.error("[n8n-import] skuPepaValue:", skuPepaValue, "isSupplierOnly:", isSupplierOnly);
 
   // Extract code from various field names GPT may use
   function extractCode(item: Record<string, unknown>): string {
