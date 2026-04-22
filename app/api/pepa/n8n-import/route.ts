@@ -305,7 +305,8 @@ export async function POST(request: NextRequest) {
       quotedItems,
       totalItems: updatedRows.length,
       path: "supplier-only",
-      debug: updatedRows.map(r => ({ sku: r.sku, supplierRef: r.supplierRef, supplier: r.bestSupplier, price: r.bestUnitPrice, status: r.itemStatus }))
+      codeMapKeys: [...codeMap.keys()],
+      debug: updatedRows.map(r => ({ sku: r.sku, supplierRef: r.supplierRef, refKey: normalizeCode(r.supplierRef ?? r.sku), supplier: r.bestSupplier, price: r.bestUnitPrice, status: r.itemStatus }))
     });
   }
 
