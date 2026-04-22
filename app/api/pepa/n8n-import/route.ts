@@ -90,12 +90,11 @@ export async function POST(request: NextRequest) {
 
   const firstItem = rawItems[0] as Record<string, unknown>;
 
-  // Detect supplier-only format: has a price field but no flex fields
   const FLEX_FIELDS = ["sku_pepa", "sku_forn", "item", "qtd_pedida"];
   const SUPPLIER_PRICE_FIELDS = ["preco_unitario", "preco_unit", "preco", "price", "unit_price", "valor_unitario"];
   const hasFlexField = FLEX_FIELDS.some((f) => f in firstItem);
-  const hasSupplierPrice = SUPPLIER_PRICE_FIELDS.some((f) => f in firstItem);
-  const isSupplierOnly = hasSupplierPrice && !hasFlexField;
+  // Supplier-only: no flex fields AND we have a roundId to load existing data from
+  const isSupplierOnly = !hasFlexField && !!existingRoundId;
 
   // Extract code from various field names GPT may use
   function extractCode(item: Record<string, unknown>): string {
@@ -108,10 +107,19 @@ export async function POST(request: NextRequest) {
 
   // Extract unit price from various field names GPT may use
   function extractPrice(item: Record<string, unknown>): number | null {
+    // Try known field names first
     for (const f of SUPPLIER_PRICE_FIELDS) {
       if (item[f] != null) {
         const v = Number(item[f]);
-        if (!isNaN(v)) return v;
+        if (!isNaN(v) && v > 0) return v;
+      }
+    }
+    // Fallback: any field whose name contains "preco"/"price"/"valor" and "unit"/"unit"
+    for (const key of Object.keys(item)) {
+      const k = key.toLowerCase().replace(/[_\s]/g, "");
+      if ((k.includes("preco") || k.includes("price") || k.includes("valor")) && (k.includes("unit") || k.includes("unitario"))) {
+        const v = Number(item[key]);
+        if (!isNaN(v) && v > 0) return v;
       }
     }
     return null;
