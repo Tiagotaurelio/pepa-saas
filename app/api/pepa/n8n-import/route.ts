@@ -442,3 +442,20 @@ export async function POST(request: NextRequest) {
   await savePepaSnapshot({ id: roundId, tenantId, createdAt, mirrorFileName: "n8n-import", supplierFilesCount: supplierMap.size, snapshot });
   return NextResponse.json({ ok: true, roundId, quotedItems, totalItems: items.length, path: "legacy-new" });
 }
+
+export async function GET(request: NextRequest) {
+  const token = process.env.PEPA_N8N_TOKEN;
+  const authHeader = request.headers.get("Authorization");
+  if (!token || authHeader !== `Bearer ${token}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const url = new URL(request.url);
+  const roundId = url.searchParams.get("roundId") ?? "";
+  const tenantId = url.searchParams.get("tenantId") ?? process.env.PEPA_N8N_TENANT_ID ?? "tenant-demo";
+  const existing = await loadPepaSnapshotByRoundId(tenantId, roundId);
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+  const rows = (existing.comparisonRows ?? []).map(r => ({
+    sku: r.sku, supplierRef: r.supplierRef, description: r.description?.slice(0, 40), unit: r.unit, qty: r.requestedQuantity, status: r.itemStatus
+  }));
+  return NextResponse.json({ roundId, rowCount: rows.length, rows });
+}
