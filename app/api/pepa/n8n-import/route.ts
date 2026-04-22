@@ -302,6 +302,7 @@ export async function POST(request: NextRequest) {
       roundId: existingRoundId,
       quotedItems,
       totalItems: updatedRows.length,
+      path: "supplier-only",
       debug: updatedRows.map(r => ({ sku: r.sku, supplierRef: r.supplierRef, supplier: r.bestSupplier, price: r.bestUnitPrice, status: r.itemStatus }))
     });
   }
@@ -404,7 +405,7 @@ export async function POST(request: NextRequest) {
     };
 
     await updatePepaSnapshot({ roundId: existingRoundId, tenantId, snapshot: updatedSnapshot });
-    return NextResponse.json({ ok: true, roundId: existingRoundId, quotedItems, totalItems: items.length });
+    return NextResponse.json({ ok: true, roundId: existingRoundId, quotedItems, totalItems: items.length, path: "legacy" });
   }
 
   const roundId = randomUUID();
@@ -436,5 +437,5 @@ export async function POST(request: NextRequest) {
   };
 
   await savePepaSnapshot({ id: roundId, tenantId, createdAt, mirrorFileName: "n8n-import", supplierFilesCount: supplierMap.size, snapshot });
-  return NextResponse.json({ ok: true, roundId, quotedItems, totalItems: items.length });
+  return NextResponse.json({ ok: true, roundId, quotedItems, totalItems: items.length, path: "legacy-new" });
 }
