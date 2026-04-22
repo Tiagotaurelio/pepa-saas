@@ -1,7 +1,7 @@
 FROM node:20-bookworm-slim AS build
 
-# Cache bust: 2026-04-22-v2
-ARG CACHEBUST=2026-04-22-v2
+# Cache bust: 2026-04-22-v3
+ARG CACHEBUST=2026-04-22-v3
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
