@@ -100,15 +100,17 @@ export async function POST(request: NextRequest) {
       .replace(/[_\s\-\.]/g, "");
   }
 
-  // Log exact payload for debugging
-  console.error("[n8n-import] firstItem keys:", Object.keys(firstItem));
-  console.error("[n8n-import] firstItem:", JSON.stringify(firstItem));
+  // Log exact payload for debugging (console.log → stdout → visible in EasyPanel)
+  console.log("[n8n-import] firstItem keys:", JSON.stringify(Object.keys(firstItem)));
+  console.log("[n8n-import] firstItem:", JSON.stringify(firstItem));
+  console.log("[n8n-import] rawItems.length:", (rawItems as unknown[]).length);
+  console.log("[n8n-import] existingRoundId:", existingRoundId);
 
   // sku_pepa must have a real non-empty value — old N8N code may set sku_pepa: undefined
   const skuPepaValue = firstItem["sku_pepa"];
   const hasRealSkuPepa = skuPepaValue !== undefined && skuPepaValue !== null && String(skuPepaValue).trim() !== "" && String(skuPepaValue) !== "undefined";
   const isSupplierOnly = !hasRealSkuPepa;
-  console.error("[n8n-import] skuPepaValue:", skuPepaValue, "isSupplierOnly:", isSupplierOnly);
+  console.log("[n8n-import] skuPepaValue:", skuPepaValue, "| isSupplierOnly:", isSupplierOnly);
 
   const SUPPLIER_PRICE_FIELDS_NORM = ["precounitario", "precounit", "preco", "price", "unitprice", "valorunitario"];
 
@@ -171,6 +173,7 @@ export async function POST(request: NextRequest) {
 
     const existing = await loadPepaSnapshotByRoundId(tenantId, existingRoundId);
     if (!existing) {
+      console.log("[n8n-import] ERRO: rodada nao encontrada para roundId:", existingRoundId);
       return NextResponse.json({ error: "Rodada não encontrada" }, { status: 404 });
     }
 
@@ -184,7 +187,12 @@ export async function POST(request: NextRequest) {
       if (key) codeMap.set(key, s);
     }
 
+    console.log("[n8n-import] codeMap keys:", JSON.stringify([...codeMap.keys()]));
+    console.log("[n8n-import] nomeFornecedor:", nomeFornecedor);
+
     const existingRows: ComparisonRow[] = existing.comparisonRows ?? [];
+    console.log("[n8n-import] existingRows count:", existingRows.length);
+    existingRows.forEach((r, i) => console.log(`[n8n-import] row[${i}] sku=${r.sku} supplierRef=${r.supplierRef} unit=${r.unit} qty=${r.requestedQuantity}`));
 
     const updatedRows: ComparisonRow[] = existingRows.map((row) => {
       // Match by supplierRef (Ref Fornecedor from Flex), fallback to sku
@@ -233,6 +241,9 @@ export async function POST(request: NextRequest) {
     const quotedItems = updatedRows.filter((r) => r.itemStatus === "quoted").length;
     const quotedValue = roundCurrency(updatedRows.reduce((sum, r) => sum + (r.bestTotal ?? 0), 0));
     const createdAt = new Date().toISOString();
+
+    console.log("[n8n-import] quotedItems:", quotedItems, "of", updatedRows.length);
+    updatedRows.forEach((r, i) => console.log(`[n8n-import] updated[${i}] sku=${r.sku} supplier=${r.bestSupplier} price=${r.bestUnitPrice} status=${r.itemStatus}`));
 
     const supplier: SupplierOffer = {
       supplierName: nomeFornecedor,
@@ -286,7 +297,13 @@ export async function POST(request: NextRequest) {
     };
 
     await updatePepaSnapshot({ roundId: existingRoundId, tenantId, snapshot: updatedSnapshot });
-    return NextResponse.json({ ok: true, roundId: existingRoundId, quotedItems, totalItems: updatedRows.length });
+    return NextResponse.json({
+      ok: true,
+      roundId: existingRoundId,
+      quotedItems,
+      totalItems: updatedRows.length,
+      debug: updatedRows.map(r => ({ sku: r.sku, supplierRef: r.supplierRef, supplier: r.bestSupplier, price: r.bestUnitPrice, status: r.itemStatus }))
+    });
   }
 
   // ── Legacy format: full items with sku_pepa, sku_forn, preco_cotado etc ──
