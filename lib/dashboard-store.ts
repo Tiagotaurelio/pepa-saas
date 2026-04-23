@@ -1,6 +1,6 @@
 import "server-only";
 
-import { listPepaRoundsForDashboard, DashboardRoundRow } from "@/lib/db";
+import { listPepaRoundsForDashboard, listUsers, DashboardRoundRow } from "@/lib/db";
 import { PepaSnapshot, ComparisonRow } from "@/lib/pepa-quotation-domain";
 
 export type DashboardSummary = {
@@ -80,12 +80,15 @@ export async function getDashboardData(params: {
   endDate: string;
   userId?: string;
 }): Promise<DashboardData> {
-  const rows = await listPepaRoundsForDashboard(
-    params.tenantId,
-    params.startDate,
-    params.endDate,
-    params.userId
-  );
+  const [rows, allUsers] = await Promise.all([
+    listPepaRoundsForDashboard(
+      params.tenantId,
+      params.startDate,
+      params.endDate,
+      params.userId
+    ),
+    listUsers(params.tenantId),
+  ]);
 
   // Calculate previous period for comparison
   const startMs = new Date(params.startDate).getTime();
@@ -118,6 +121,21 @@ export async function getDashboardData(params: {
       weeklySavings: Map<string, number>;
     }
   >();
+
+  // Pre-populate with all active users so they appear even with 0 rounds in the period
+  for (const u of allUsers) {
+    if (u.active && (!params.userId || u.id === params.userId)) {
+      userMap.set(u.id, {
+        userName: u.name,
+        rounds: 0,
+        itemsValidated: 0,
+        closedRounds: 0,
+        savings: 0,
+        totalBaseValue: 0,
+        weeklySavings: new Map(),
+      });
+    }
+  }
 
   const timelineMap = new Map<string, { savings: number; rounds: number }>();
 
