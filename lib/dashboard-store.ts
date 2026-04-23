@@ -147,8 +147,9 @@ export async function getDashboardData(params: {
     totalSavings += metrics.savings;
     totalBaseValue += metrics.totalBaseValue;
 
-    // Per-user aggregation
-    const uid = row.userId ?? "unknown";
+    // Per-user aggregation — skip N8N/automated rounds with no user
+    if (!row.userId) continue;
+    const uid = row.userId;
     const uname = row.userName ?? "Desconhecido";
     if (!userMap.has(uid)) {
       userMap.set(uid, {
