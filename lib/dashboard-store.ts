@@ -14,15 +14,23 @@ export type DashboardSummary = {
   };
 };
 
+export type BrandBreakdown = {
+  brand: string;
+  savings: number;
+};
+
 export type UserPerformance = {
   userId: string;
   userName: string;
+  role: string;
   rounds: number;
   itemsValidated: number;
   closedRounds: number;
   savings: number;
   savingsPercent: number;
   trend: number[];
+  brands: string[];
+  brandBreakdown: BrandBreakdown[];
 };
 
 export type TimelinePoint = {
@@ -113,12 +121,15 @@ export async function getDashboardData(params: {
     string,
     {
       userName: string;
+      role: string;
       rounds: number;
       itemsValidated: number;
       closedRounds: number;
       savings: number;
       totalBaseValue: number;
       weeklySavings: Map<string, number>;
+      brands: Set<string>;
+      brandSavings: Map<string, number>;
     }
   >();
 
@@ -127,12 +138,15 @@ export async function getDashboardData(params: {
     if (u.active && (!params.userId || u.id === params.userId)) {
       userMap.set(u.id, {
         userName: u.name,
+        role: u.role,
         rounds: 0,
         itemsValidated: 0,
         closedRounds: 0,
         savings: 0,
         totalBaseValue: 0,
         weeklySavings: new Map(),
+        brands: new Set(),
+        brandSavings: new Map(),
       });
     }
   }
@@ -154,12 +168,15 @@ export async function getDashboardData(params: {
     if (!userMap.has(uid)) {
       userMap.set(uid, {
         userName: uname,
+        role: "buyer",
         rounds: 0,
         itemsValidated: 0,
         closedRounds: 0,
         savings: 0,
         totalBaseValue: 0,
-        weeklySavings: new Map()
+        weeklySavings: new Map(),
+        brands: new Set(),
+        brandSavings: new Map(),
       });
     }
     const u = userMap.get(uid)!;
@@ -168,6 +185,23 @@ export async function getDashboardData(params: {
     if (metrics.isClosed) u.closedRounds += 1;
     u.savings += metrics.savings;
     u.totalBaseValue += metrics.totalBaseValue;
+
+    // Collect brands (suppliers) from this round
+    for (const sup of snapshot.suppliers ?? []) {
+      if (sup.supplierName) u.brands.add(sup.supplierName);
+    }
+    // Per-brand savings from comparison rows
+    for (const cr of snapshot.comparisonRows ?? []) {
+      if (
+        cr.bestSupplier &&
+        cr.baseUnitPrice != null &&
+        cr.bestUnitPrice != null &&
+        cr.bestUnitPrice < cr.baseUnitPrice
+      ) {
+        const s = (cr.baseUnitPrice - cr.bestUnitPrice) * cr.requestedQuantity;
+        u.brandSavings.set(cr.bestSupplier, (u.brandSavings.get(cr.bestSupplier) ?? 0) + s);
+      }
+    }
 
     const weekKey = getWeekKey(row.createdAt);
     u.weeklySavings.set(weekKey, (u.weeklySavings.get(weekKey) ?? 0) + metrics.savings);
@@ -216,13 +250,20 @@ export async function getDashboardData(params: {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([, v]) => Math.round(v * 100) / 100);
 
+    const brandBreakdown: BrandBreakdown[] = Array.from(data.brandSavings.entries())
+      .map(([brand, savings]) => ({ brand, savings: Math.round(savings * 100) / 100 }))
+      .sort((a, b) => b.savings - a.savings);
+
     return {
       userId,
       userName: data.userName,
+      role: data.role,
       rounds: data.rounds,
       itemsValidated: data.itemsValidated,
       closedRounds: data.closedRounds,
       savings: Math.round(data.savings * 100) / 100,
+      brands: Array.from(data.brands),
+      brandBreakdown,
       savingsPercent:
         data.totalBaseValue > 0
           ? Math.round((data.savings / data.totalBaseValue) * 10000) / 100

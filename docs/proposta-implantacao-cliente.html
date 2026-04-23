@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>PEPA SaaS — Proposta de Implantação</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      white-space: pre-wrap;
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">PEPA SaaS — Proposta de Implantação</h1>
+</header>
+<h1 id="pepa-saas-proposta-de-implantação">PEPA SaaS — Proposta de
+Implantação</h1>
+<p><strong>Documento para apresentação ao cliente</strong> Data: Abril
+de 2026</p>
+<hr />
+<h2 id="o-que-é-o-pepa-saas">O que é o PEPA SaaS</h2>
+<p>O PEPA é uma plataforma de cotação inteligente que automatiza o
+processo de comparação de preços entre fornecedores. Utilizando
+Inteligência Artificial, o sistema lê os PDFs de tabelas de preços
+enviados pelos fornecedores, extrai os dados automaticamente e monta uma
+tabela comparativa para que a equipe de compras tome a melhor decisão de
+compra.</p>
+<p><strong>Benefícios principais:</strong> - Elimina digitação manual de
+preços - Reduz erros de leitura e transcrição - Agiliza o processo de
+cotação - Gera trilha de auditoria de todas as decisões de compra -
+Permite que múltiplos usuários trabalhem simultaneamente</p>
+<hr />
+<h2 id="infraestrutura-de-hospedagem">1. Infraestrutura de
+Hospedagem</h2>
+<p>Como o cliente já possui servidor próprio, não há necessidade de
+contratar um servidor externo (VPS). O PEPA será instalado diretamente
+na máquina do cliente.</p>
+<p><strong>Requisitos mínimos do servidor:</strong></p>
+<table>
+<colgroup>
+<col style="width: 44%" />
+<col style="width: 56%" />
+</colgroup>
+<thead>
+<tr>
+<th>Requisito</th>
+<th>Especificação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sistema Operacional</td>
+<td>Ubuntu 22.04 LTS ou superior (Linux)</td>
+</tr>
+<tr>
+<td>Memória RAM</td>
+<td>Mínimo 2GB (recomendado 4GB)</td>
+</tr>
+<tr>
+<td>Espaço em disco</td>
+<td>Mínimo 20GB livres</td>
+</tr>
+<tr>
+<td>Docker</td>
+<td>Instalado e configurado</td>
+</tr>
+<tr>
+<td>Acesso à internet</td>
+<td>Necessário para comunicação com banco de dados e IA</td>
+</tr>
+<tr>
+<td>IP fixo</td>
+<td>Necessário para vincular ao domínio da empresa</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>Se o servidor do cliente já estiver em funcionamento com outras
+aplicações, verificaremos a compatibilidade antes da instalação para não
+interferir nos sistemas existentes.</p>
+</blockquote>
+<hr />
+<h2 id="domínio">2. Domínio</h2>
+<p>O cliente precisará de um endereço web próprio para acessar o sistema
+(ex: <code>compras.empresacliente.com.br</code>).</p>
+<ul>
+<li>Pode ser um subdomínio de um domínio que o cliente já possua (sem
+custo adicional)</li>
+<li>Caso não possua domínio, o registro custa entre <strong>R$40 e
+R$80/ano</strong></li>
+<li>Configuraremos o certificado SSL (cadeado de segurança) sem custo
+adicional</li>
+</ul>
+<hr />
+<h2 id="banco-de-dados">3. Banco de Dados</h2>
+<p>O PEPA utiliza o <strong>Supabase</strong> como banco de dados
+(PostgreSQL).</p>
+<ul>
+<li>O cliente terá um projeto próprio no Supabase, independente de
+outros clientes</li>
+<li><strong>Plano gratuito</strong> atende bem o volume inicial (até
+500MB de dados e 50.000 usuários ativos/mês)</li>
+<li>Caso o volume cresça, o plano pago custa a partir de
+<strong>US$25/mês (~R$125/mês)</strong></li>
+<li>Todos os dados ficam armazenados com segurança na nuvem com backup
+automático</li>
+</ul>
+<hr />
+<h2 id="automação-com-n8n">4. Automação com N8N</h2>
+<p>O N8N é a ferramenta responsável por monitorar os PDFs dos
+fornecedores e enviá-los automaticamente para o sistema. O cliente
+precisará de uma conta própria.</p>
+<p><strong>Opções disponíveis:</strong></p>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 44%" />
+<col style="width: 28%" />
+</colgroup>
+<thead>
+<tr>
+<th>Opção</th>
+<th>Descrição</th>
+<th>Custo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>N8N Cloud</td>
+<td>Conta na plataforma n8n.io, mais simples de manter</td>
+<td>A partir de US$20/mês (~R$100/mês)</td>
+</tr>
+<tr>
+<td>N8N Self-hosted</td>
+<td>Instalado no próprio servidor do cliente</td>
+<td>Gratuito</td>
+</tr>
+</tbody>
+</table>
+<p><strong>O fluxo de automação já está pronto</strong> — será exportado
+e importado na conta do cliente em poucos minutos, sem necessidade de
+recriar do zero. Apenas as credenciais (Google Drive, OpenAI) serão
+atualizadas para as do cliente.</p>
+<hr />
+<h2 id="inteligência-artificial-openai">5. Inteligência Artificial
+(OpenAI)</h2>
+<p>A extração automática de dados dos PDFs dos fornecedores é feita pelo
+modelo <strong>GPT-4o</strong> da OpenAI. O cliente precisará de uma
+conta própria na OpenAI com saldo ativo.</p>
+<p><strong>Como funciona a cobrança:</strong> - A OpenAI cobra por uso —
+o cliente paga somente pelo que utilizar - Não há mensalidade fixa -
+Custo estimado por PDF processado: <strong>R$0,05 a R$0,20</strong>
+dependendo do tamanho do arquivo</p>
+<p><strong>Estimativa mensal de custo:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Volume de cotações/mês</th>
+<th>Custo estimado OpenAI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Até 50 PDFs</td>
+<td>R$3 a R$10</td>
+</tr>
+<tr>
+<td>50 a 200 PDFs</td>
+<td>R$10 a R$40</td>
+</tr>
+<tr>
+<td>Acima de 200 PDFs</td>
+<td>R$40 a R$80</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Processo de configuração:</strong> 1. Cliente cria conta em
+platform.openai.com 2. Cliente adiciona crédito (recomendamos começar
+com US$10) 3. Cliente gera uma chave de API (API Key) 4. Configuramos a
+chave no sistema — pronto</p>
+<hr />
+<h2 id="integração-com-erp">6. Integração com ERP</h2>
+<p>Caso o cliente deseje futuramente integrar o PEPA com o ERP utilizado
+na empresa, isso é totalmente viável. O PEPA já possui uma arquitetura
+de APIs REST preparada para integrações.</p>
+<p><strong>O que pode ser integrado:</strong> - Importação automática de
+itens e pedidos do ERP para o PEPA - Exportação das cotações aprovadas
+diretamente para o ERP - Sincronização de cadastro de fornecedores e
+produtos</p>
+<p><strong>Como proceder:</strong> Para desenvolver a integração,
+precisaremos saber: - Qual ERP o cliente utiliza (TOTVS, SAP, Omie,
+Bling, etc.) - Se o ERP possui API própria ou trabalha com exportação de
+arquivos - Quais dados precisam ser trocados entre os sistemas</p>
+<p>O desenvolvimento da integração será orçado separadamente conforme o
+escopo definido.</p>
+<hr />
+<h2 id="resumo-plataformas-necessárias">7. Resumo — Plataformas
+necessárias</h2>
+<table>
+<colgroup>
+<col style="width: 28%" />
+<col style="width: 28%" />
+<col style="width: 42%" />
+</colgroup>
+<thead>
+<tr>
+<th>Plataforma</th>
+<th>Finalidade</th>
+<th>Custo estimado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Servidor próprio do cliente</td>
+<td>Hospedagem do sistema</td>
+<td>Já disponível</td>
+</tr>
+<tr>
+<td>Domínio (subdomínio)</td>
+<td>Endereço web de acesso</td>
+<td>Gratuito (se já possui domínio)</td>
+</tr>
+<tr>
+<td>GitHub</td>
+<td>Repositório do código para atualizações</td>
+<td>Gratuito</td>
+</tr>
+<tr>
+<td>Supabase</td>
+<td>Banco de dados</td>
+<td>Gratuito (plano inicial)</td>
+</tr>
+<tr>
+<td>N8N</td>
+<td>Automação de leitura dos PDFs</td>
+<td>R$0 a R$100/mês</td>
+</tr>
+<tr>
+<td>OpenAI</td>
+<td>Extração de dados via IA</td>
+<td>R$3 a R$80/mês (conforme uso)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Custo operacional estimado total: R$3 a R$180/mês</strong>
+(dependendo do volume de uso e da opção de N8N escolhida)</p>
+<hr />
+<h2 id="etapas-de-implantação">8. Etapas de Implantação</h2>
+<p>Abaixo o passo a passo de tudo que será feito para entregar o sistema
+funcionando no ambiente do cliente:</p>
+<p><strong>Etapa 1 — Preparação do servidor</strong> - Verificar
+requisitos do servidor do cliente - Instalar Docker caso não esteja
+instalado - Configurar domínio e SSL</p>
+<p><strong>Etapa 2 — Instalação do PEPA</strong> - Configurar o ambiente
+no servidor do cliente - Realizar a migração do banco de dados -
+Configurar variáveis de ambiente (segredos, tokens) - Testar o sistema
+no novo ambiente</p>
+<p><strong>Etapa 3 — Configuração das integrações</strong> - Criar conta
+N8N do cliente (ou instalar no servidor) - Importar o fluxo de automação
+já pronto - Criar conta OpenAI do cliente e configurar API Key -
+Conectar Google Drive do cliente ao fluxo N8N - Testar o fluxo completo
+(PDF → IA → PEPA)</p>
+<p><strong>Etapa 4 — Cadastro de usuários</strong> - Cadastrar todos os
+usuários da equipe de compras - Definir permissões (admin / comprador) -
+Realizar treinamento com a equipe</p>
+<p><strong>Etapa 5 — Validação e entrega</strong> - Processar cotações
+reais para validação - Confirmar que todos os fluxos estão funcionando -
+Entregar documentação de uso para a equipe - Definir canal de suporte
+pós-implantação</p>
+<hr />
+<h2 id="suporte-pós-implantação">9. Suporte pós-implantação</h2>
+<p>Após a entrega, recomenda-se um período de suporte acompanhado para
+garantir que a equipe do cliente utilize o sistema com segurança. Esse
+suporte pode ser contratado separadamente conforme a necessidade do
+cliente.</p>
+<hr />
+<p><em>Documento elaborado por Maravai Inteligência Empresarial</em>
+<em>Criciúma-SC — contato: anderson@maravai.com.br</em></p>
+</body>
+</html>

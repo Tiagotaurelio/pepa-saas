@@ -61,6 +61,7 @@ export default function PainelPerformancePage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
+  const [selectedBuyerId, setSelectedBuyerId] = useState<string | undefined>(undefined);
   const [users, setUsers] = useState<UserOption[]>([]);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -218,8 +219,20 @@ export default function PainelPerformancePage() {
             <div className="rounded-[24px] bg-white p-6 shadow-panel">
               <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-brand-muted">
                 Ranking por comprador
+                {selectedBuyerId && (
+                  <button
+                    onClick={() => setSelectedBuyerId(undefined)}
+                    className="ml-3 text-xs font-normal normal-case text-brand-blue hover:underline"
+                  >
+                    Limpar seleção
+                  </button>
+                )}
               </h3>
-              <UserRankingChart data={data.byUser} />
+              <UserRankingChart
+                data={data.byUser}
+                selectedUserId={selectedBuyerId}
+                onSelectUser={setSelectedBuyerId}
+              />
             </div>
           </div>
 
@@ -228,7 +241,11 @@ export default function PainelPerformancePage() {
             <h3 className="mb-4 text-sm font-semibold uppercase tracking-wider text-brand-muted">
               Performance por comprador
             </h3>
-            <PerformanceTable data={data.byUser} />
+            <PerformanceTable
+              data={data.byUser}
+              selectedUserId={selectedBuyerId}
+              onSelectUser={setSelectedBuyerId}
+            />
           </div>
         </>
       ) : null}

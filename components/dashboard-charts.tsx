@@ -6,6 +6,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -18,15 +19,23 @@ export type TimelinePoint = {
   rounds: number;
 };
 
+export type BrandBreakdown = {
+  brand: string;
+  savings: number;
+};
+
 export type UserPerformance = {
   userId: string;
   userName: string;
+  role: string;
   rounds: number;
   itemsValidated: number;
   closedRounds: number;
   savings: number;
   savingsPercent: number;
   trend: number[];
+  brands: string[];
+  brandBreakdown: BrandBreakdown[];
 };
 
 function fmtCurrency(v: number) {
@@ -87,8 +96,22 @@ export function SavingsTimeline({ data }: { data: TimelinePoint[] }) {
   );
 }
 
-export function UserRankingChart({ data }: { data: UserPerformance[] }) {
-  if (data.length === 0) {
+export function UserRankingChart({
+  data,
+  selectedUserId,
+  onSelectUser,
+}: {
+  data: UserPerformance[];
+  selectedUserId?: string;
+  onSelectUser?: (userId: string | undefined) => void;
+}) {
+  // Show only buyers with savings > 0, sorted descending
+  const buyers = data
+    .filter((u) => u.role === "buyer" && u.savings > 0)
+    .sort((a, b) => b.savings - a.savings)
+    .slice(0, 10);
+
+  if (buyers.length === 0) {
     return (
       <div className="flex h-[280px] items-center justify-center text-sm text-brand-muted">
         Sem dados para o periodo
@@ -96,11 +119,23 @@ export function UserRankingChart({ data }: { data: UserPerformance[] }) {
     );
   }
 
-  const sorted = [...data].sort((a, b) => b.savings - a.savings).slice(0, 10);
+  const handleClick = (entry: { userId: string }) => {
+    if (!onSelectUser) return;
+    onSelectUser(selectedUserId === entry.userId ? undefined : entry.userId);
+  };
 
   return (
     <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={sorted} layout="vertical" margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+      <BarChart
+        data={buyers}
+        layout="vertical"
+        margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+        onClick={(e) => {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const payload = (e as any)?.activePayload?.[0]?.payload;
+          if (payload) handleClick(payload as { userId: string });
+        }}
+      >
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" horizontal={false} />
         <XAxis
           type="number"
@@ -113,13 +148,25 @@ export function UserRankingChart({ data }: { data: UserPerformance[] }) {
           dataKey="userName"
           tick={{ fontSize: 12 }}
           stroke="#94a3b8"
-          width={100}
+          width={80}
         />
         <Tooltip
           formatter={(value) => [fmtCurrency(Number(value)), "Economia"]}
           contentStyle={{ borderRadius: 12, border: "1px solid #e2e8f0" }}
+          cursor={{ fill: "rgba(11,98,164,0.06)" }}
         />
-        <Bar dataKey="savings" fill="#0B62A4" radius={[0, 6, 6, 0]} />
+        <Bar dataKey="savings" radius={[0, 6, 6, 0]} style={{ cursor: onSelectUser ? "pointer" : "default" }}>
+          {buyers.map((entry) => (
+            <Cell
+              key={entry.userId}
+              fill={
+                !selectedUserId || selectedUserId === entry.userId
+                  ? "#0B62A4"
+                  : "#cbd5e1"
+              }
+            />
+          ))}
+        </Bar>
       </BarChart>
     </ResponsiveContainer>
   );
