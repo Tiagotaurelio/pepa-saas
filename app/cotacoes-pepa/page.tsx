@@ -5,11 +5,22 @@ import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 
 import { OperationFeedback } from "@/components/operation-feedback";
+import { AdminRoundsOverview } from "@/components/admin-rounds-overview";
 import { usePepaSnapshot } from "@/lib/use-pepa-snapshot";
 
 export default function CotacoesPepaPage() {
   const searchParams = useSearchParams();
   const roundId = searchParams.get("roundId");
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((r) => r.json())
+      .then((d: { session?: { role?: string } }) => {
+        if (d.session?.role === "admin") setIsAdmin(true);
+      })
+      .catch(() => {});
+  }, []);
   const { snapshot, isLoading: isLoadingSnapshot, error: snapshotError } = usePepaSnapshot(roundId);
   const isClosedRound = snapshot.latestRound?.status === "closed";
   const mirrorInputRef = useRef<HTMLInputElement | null>(null);
@@ -227,6 +238,9 @@ export default function CotacoesPepaPage() {
   return (
     <div>
       <div id="pepa-screen-content">
+      {/* Painel admin — visão geral de todas as rodadas */}
+      {isAdmin && <AdminRoundsOverview />}
+
       {/* Upload */}
       <section className="rounded-[32px] bg-white p-6 shadow-panel">
         <h2 className="text-xl font-semibold text-brand-ink">Importar arquivos</h2>

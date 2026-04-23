@@ -891,6 +891,74 @@ export async function listPepaRoundsForDashboard(
   }));
 }
 
+export type RoundsOverviewRow = {
+  id: string;
+  createdAt: string;
+  mirrorFileName: string;
+  userId: string | null;
+  userName: string | null;
+  snapshotJson: string;
+};
+
+export async function listPepaRoundsWithUser(
+  tenantId: string,
+  limit = 100
+): Promise<RoundsOverviewRow[]> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const result = await getPostgresPool().query<{
+      id: string;
+      created_at: string;
+      mirror_file_name: string;
+      user_id: string | null;
+      user_name: string | null;
+      snapshot_json: string;
+    }>(
+      `SELECT r.id, r.created_at, r.mirror_file_name, r.user_id, u.name as user_name, r.snapshot_json
+       FROM ${pgTable("pepa_rounds")} r
+       LEFT JOIN ${pgTable("users")} u ON r.user_id = u.id
+       WHERE r.tenant_id = $1
+       ORDER BY r.created_at DESC
+       LIMIT $2`,
+      [tenantId, limit]
+    );
+    return result.rows.map((r) => ({
+      id: r.id,
+      createdAt: r.created_at,
+      mirrorFileName: r.mirror_file_name,
+      userId: r.user_id,
+      userName: r.user_name,
+      snapshotJson: r.snapshot_json,
+    }));
+  }
+
+  const db = getSqlite();
+  const rows = db.prepare(
+    `SELECT r.id, r.created_at, r.mirror_file_name, r.user_id, u.name as user_name, r.snapshot_json
+     FROM pepa_rounds r
+     LEFT JOIN users u ON r.user_id = u.id
+     WHERE r.tenant_id = ?
+     ORDER BY r.created_at DESC
+     LIMIT ?`
+  ).all(tenantId, limit) as {
+    id: string;
+    created_at: string;
+    mirror_file_name: string;
+    user_id: string | null;
+    user_name: string | null;
+    snapshot_json: string;
+  }[];
+
+  return rows.map((r) => ({
+    id: r.id,
+    createdAt: r.created_at,
+    mirrorFileName: r.mirror_file_name,
+    userId: r.user_id,
+    userName: r.user_name,
+    snapshotJson: r.snapshot_json,
+  }));
+}
+
 function hashPassword(value: string) {
   return createHash("sha256").update(value).digest("hex");
 }
