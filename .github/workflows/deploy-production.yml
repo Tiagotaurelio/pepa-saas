@@ -63,7 +63,7 @@ jobs:
             PEPA_PUBLIC_DOMAIN=${{ secrets.PEPA_PUBLIC_DOMAIN }}
             EOF
             cd "$DEPLOY_PATH"
-            docker build -t pepa-saas:latest .
+            docker build --no-cache -t pepa-saas:latest .
             docker rm -f pepa-saas-prod || true
             for attempt in $(seq 1 15); do
               if ! docker ps -a --format '{{.Names}}' | grep -qx 'pepa-saas-prod'; then
