@@ -60,5 +60,5 @@ export async function POST(request: NextRequest) {
     )
   });
 
-  return NextResponse.json({ snapshot });
+  return NextResponse.json({ snapshot, roundId: snapshot.latestRound?.id ?? null });
 }

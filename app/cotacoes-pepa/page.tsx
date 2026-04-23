@@ -92,6 +92,7 @@ export default function CotacoesPepaPage() {
     const response = await fetch("/api/pepa/upload", { method: "POST", body: formData, credentials: "same-origin" });
     const payload = (await response.json()) as {
       error?: string;
+      roundId?: string | null;
       snapshot?: {
         latestRound: { requestedItemsCount: number; supplierFilesCount: number } | null;
         diagnostics: { parsedSuppliers: number; ocrSuppliers: number; manualReviewSuppliers: number; storedForReviewAttachments: number };
@@ -120,8 +121,12 @@ export default function CotacoesPepaPage() {
     setSupplierFiles([]);
     if (mirrorInputRef.current) mirrorInputRef.current.value = "";
     if (supplierInputRef.current) supplierInputRef.current.value = "";
-    window.dispatchEvent(new Event("pepa-store-updated"));
     setIsSubmitting(false);
+    if (payload.roundId) {
+      window.location.assign(`/cotacoes-pepa?roundId=${payload.roundId}`);
+    } else {
+      window.dispatchEvent(new Event("pepa-store-updated"));
+    }
   }
 
   async function handleProcessWithAI() {
