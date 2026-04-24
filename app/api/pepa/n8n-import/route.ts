@@ -221,8 +221,8 @@ export async function POST(request: NextRequest) {
         return m ? parseInt(m[1], 10) : null;
       }
 
-      if (suppUnit === "RL" && flexUnit !== "RL") {
-        // Supplier sells per RL, FLEX wants per MT → divide
+      if (suppUnit === "RL" && flexUnit === "MT") {
+        // Supplier sells per RL, FLEX wants per MT (e.g. cables) → divide
         const meters = metersFromDescription(row.description ?? "");
         if (meters && meters > 0) {
           preco = preco / meters;
