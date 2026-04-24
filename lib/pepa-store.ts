@@ -587,9 +587,18 @@ function convertSupplierPriceToFlexUnit(
     return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
   }
 
+  // RL → UN: both units represent one roll — treat as equivalent, no conversion needed
+  if ((sUnit === "RL" || sUnit === "ROLO") && isFlexUnitSingle) {
+    return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
+  }
+
   // RL → MT conversion: find meters per roll from Flex description
+  // Use dimension pattern "X<N>M" first (e.g. 19MMX5M → 5), then 2+ digit fallback (10M, 100M).
+  // Avoids matching brand names like "3M" as "3 meters".
   if ((sUnit === "RL" || sUnit === "ROLO") && (fUnit === "MT" || fUnit === "M")) {
-    const metersMatch = flexDescription.match(/(\d+)\s*M\b/i);
+    const dimMatch = flexDescription.match(/[xX×]\s*(\d+)\s*M\b/i);
+    const numMatch = flexDescription.match(/\b(\d{2,})\s*M\b/i);
+    const metersMatch = dimMatch ?? numMatch;
     const metersPerRoll = metersMatch ? parseInt(metersMatch[1], 10) : 100; // default 100M/RL
     if (metersPerRoll > 0) {
       return {
@@ -821,6 +830,10 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     // Extract text lines (used for payment/freight/date terms and as fallback parser input)
     const { lines } = await extractTextFromPdf(file.buffer);
 
+    // Try to extract supplier name from PDF content (more reliable than file name for proposals)
+    const nameFromPdf = extractSupplierNameFromPdfLines(lines);
+    const resolvedSupplierName = nameFromPdf ?? supplierName;
+
     // Also try text-based parser for comparison
     const textItems = lines.length > 0 ? parseGenericSupplierPdf(lines) : [];
 
@@ -848,7 +861,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
       }));
 
       return {
-        supplierName,
+        supplierName: resolvedSupplierName,
         sourceFile: file.name,
         extractionStatus: "parsed",
         detectedFormat: "pdf",
@@ -870,7 +883,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     // FALLBACK: Table extraction returned 0 items — try text-based generic parser
     if (lines.length === 0) {
       return {
-        supplierName,
+        supplierName: resolvedSupplierName,
         sourceFile: file.name,
         extractionStatus: "ocr-required",
         detectedFormat: "pdf",
@@ -884,7 +897,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     const genericItems = parseGenericSupplierPdf(lines);
     if (genericItems.length > 0) {
       return {
-        supplierName,
+        supplierName: resolvedSupplierName,
         sourceFile: file.name,
         extractionStatus: "parsed",
         detectedFormat: "pdf",
@@ -904,7 +917,7 @@ async function parseSupplierFile(file: UploadFileInput): Promise<ParsedSupplierF
     }
 
     return {
-      supplierName,
+      supplierName: resolvedSupplierName,
       sourceFile: file.name,
       extractionStatus: "manual-review",
       detectedFormat: "pdf",
@@ -1231,10 +1244,13 @@ function inferSupplierName(fileName: string) {
 }
 
 function extractSupplierNameFromPdfLines(lines: string[]): string | null {
-  // Strategy: look for lines immediately before "ORCAMENTO <number>" — that's where the
-  // supplier company name typically appears in Brazilian quote PDFs.
+  // Strategy 1: look for lines immediately before "ORCAMENTO/PROPOSTA <number>" —
+  // that's where the supplier company name typically appears in Brazilian quote PDFs.
+  // For PROPOSTA format: the vendor (fornecedor) company name appears in the letterhead,
+  // BEFORE the document title line. "Razão Social" in a PROPOSTA = the BUYER, not seller.
+  const docTitleRe = /^(or[cç]amento|proposta)\s+(n[º°.]?\s*)?\d+/i;
   for (let i = 1; i < Math.min(lines.length, 40); i++) {
-    if (/^or[cç]amento\s+\d+/i.test((lines[i] ?? "").trim())) {
+    if (docTitleRe.test((lines[i] ?? "").trim())) {
       // Collect candidate lines before this one (within 6 lines)
       const candidates: string[] = [];
       for (let j = Math.max(0, i - 6); j < i; j++) {
@@ -1242,10 +1258,15 @@ function extractSupplierNameFromPdfLines(lines: string[]): string | null {
         if (!candidate || candidate.length < 3) continue;
         if (looksLikeAddressOrMeta(candidate)) continue;
         if (/^\d/.test(candidate)) continue;
-        if (/^or[cç]amento\b/i.test(candidate)) continue;
+        if (docTitleRe.test(candidate)) continue;
         if (/v[aá]lido por/i.test(candidate)) continue;
-        if (/^(cliente|vendedor|prazo|emissao|validade)\s*$/i.test(candidate)) continue;
-        if (/[A-Za-zÀ-ÿ]{3}/.test(candidate)) {
+        if (/^(cliente|vendedor|prazo|emissao|validade|raz[aã]o social|comprador|representad[ao])\s*$/i.test(candidate)) continue;
+        // Skip lines that look like buyer identification (contains CNPJ-like data nearby)
+        if (/\bltda\b|\bs\.a\b|\bme\b|\beira\b/i.test(candidate)) {
+          // Only include if it doesn't match the buyer company pattern
+          // (for PROPOSTA, buyer appears after the document title, not before)
+          candidates.push(candidate);
+        } else if (/[A-Za-zÀ-ÿ]{3}/.test(candidate)) {
           candidates.push(candidate);
         }
       }
@@ -1314,7 +1335,7 @@ function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: str
 
   // --- Comprehensive header aliases ---
   const HEADER_ALIASES: Record<string, string[]> = {
-    sku: ["produto", "codigo", "cod", "cód", "cód.", "item", "ref", "ordem", "seq", "codigo de barras"],
+    sku: ["produto", "codigo", "cod", "cód", "cód.", "ref", "codigo de barras"],
     description: ["descricao", "descrição", "desc", "nome", "material", "descricao dos itens", "descrição dos itens"],
     quantity: ["quantidade", "qtde", "qtd", "qt", "qt. ped", "qt.ped"],
     unit: ["unidade", "un", "und", "un.", "mad."],
