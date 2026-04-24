@@ -229,8 +229,8 @@ export async function POST(request: NextRequest) {
         } else {
           return { ...row, itemStatus: "ocr-pending" as const, offers: [] };
         }
-      } else if (suppUnit === "MT" && flexUnit === "RL") {
-        // Supplier sells per MT, FLEX wants per RL → multiply
+      } else if (suppUnit === "MT" && (flexUnit === "RL" || flexUnit === "UN")) {
+        // Supplier sells per MT, FLEX wants per rolo/unidade → multiply
         const meters = metersFromDescription(row.description ?? "");
         if (meters && meters > 0) {
           preco = preco * meters;
