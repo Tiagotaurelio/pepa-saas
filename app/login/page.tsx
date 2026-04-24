@@ -72,6 +72,11 @@ export default function LoginPage() {
           </button>
         </form>
 
+        <p className="mt-6 text-center text-sm text-slate-500">
+          <Link href="/recuperar-senha" className="text-brand-blue hover:underline">
+            Esqueci minha senha
+          </Link>
+        </p>
       </div>
     </div>
   );

@@ -36,7 +36,15 @@ export type AuthSession = {
   userEmail: string;
   tenantName: string;
   expiresAt: string;
-  role: "admin" | "buyer";
+  role: "admin" | "buyer" | "super_admin";
+};
+
+export type TenantRow = {
+  id: string;
+  name: string;
+  active: boolean;
+  userCount: number;
+  createdAt: string;
 };
 
 export type UserRow = {
@@ -165,6 +173,14 @@ function initializeSqliteSchema(db: Database.Database) {
       snapshot_json text not null,
       user_id text default null
     );
+
+    create table if not exists password_reset_tokens (
+      token text primary key,
+      user_id text not null,
+      tenant_id text not null,
+      expires_at text not null,
+      used integer not null default 0
+    );
   `);
 
   // Idempotent ALTER TABLE for existing databases
@@ -172,6 +188,8 @@ function initializeSqliteSchema(db: Database.Database) {
   try { db.exec("alter table users add column active integer not null default 1"); } catch (_) { /* column exists */ }
   try { db.exec("alter table users add column created_at text not null default ''"); } catch (_) { /* column exists */ }
   try { db.exec("alter table pepa_rounds add column user_id text default null"); } catch (_) { /* column exists */ }
+  try { db.exec("alter table tenants add column active integer not null default 1"); } catch (_) { /* column exists */ }
+  try { db.exec("alter table tenants add column created_at text not null default ''"); } catch (_) { /* column exists */ }
 
   // Ensure demo user is always admin
   db.exec(`update users set role = 'admin' where id = 'user-demo'`);
@@ -218,6 +236,14 @@ async function ensurePostgresReady() {
       snapshot_json text not null,
       user_id text default null
     );
+
+    create table if not exists ${pgTable("password_reset_tokens")} (
+      token text primary key,
+      user_id text not null,
+      tenant_id text not null,
+      expires_at text not null,
+      used boolean not null default false
+    );
   `);
 
   // Idempotent ALTER TABLE for existing databases
@@ -225,6 +251,8 @@ async function ensurePostgresReady() {
   await pool.query(`ALTER TABLE ${pgTable("users")} ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`);
   await pool.query(`ALTER TABLE ${pgTable("users")} ADD COLUMN IF NOT EXISTS created_at text NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE ${pgTable("pepa_rounds")} ADD COLUMN IF NOT EXISTS user_id text DEFAULT NULL`);
+  await pool.query(`ALTER TABLE ${pgTable("tenants")} ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true`);
+  await pool.query(`ALTER TABLE ${pgTable("tenants")} ADD COLUMN IF NOT EXISTS created_at text NOT NULL DEFAULT ''`);
 
   const countResult = await pool.query<{ count: string }>(`select count(*)::text as count from ${pgTable("tenants")}`);
   if (Number(countResult.rows[0]?.count ?? "0") === 0) {
@@ -957,6 +985,156 @@ export async function listPepaRoundsWithUser(
     userName: r.user_name,
     snapshotJson: r.snapshot_json,
   }));
+}
+
+// ── Super-admin: tenant management ──────────────────────────────────────────
+
+export async function listTenants(): Promise<TenantRow[]> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const result = await getPostgresPool().query<{
+      id: string; name: string; active: boolean; created_at: string; user_count: string;
+    }>(
+      `SELECT t.id, t.name, t.active, t.created_at,
+              COUNT(u.id)::text as user_count
+       FROM ${pgTable("tenants")} t
+       LEFT JOIN ${pgTable("users")} u ON u.tenant_id = t.id
+       GROUP BY t.id, t.name, t.active, t.created_at
+       ORDER BY t.created_at ASC`
+    );
+    return result.rows.map(r => ({
+      id: r.id, name: r.name, active: r.active,
+      userCount: Number(r.user_count), createdAt: r.created_at,
+    }));
+  }
+  const db = getSqlite();
+  const rows = db.prepare(
+    `SELECT t.id, t.name, t.active, t.created_at,
+            COUNT(u.id) as user_count
+     FROM tenants t
+     LEFT JOIN users u ON u.tenant_id = t.id
+     GROUP BY t.id ORDER BY t.created_at ASC`
+  ).all() as { id: string; name: string; active: number; created_at: string; user_count: number }[];
+  return rows.map(r => ({
+    id: r.id, name: r.name, active: r.active === 1,
+    userCount: r.user_count, createdAt: r.created_at,
+  }));
+}
+
+export async function createTenant(params: {
+  name: string;
+  adminName: string;
+  adminEmail: string;
+  adminPassword: string;
+}): Promise<{ tenantId: string; userId: string }> {
+  const tenantId = randomUUID();
+  const userId = randomUUID();
+  const now = new Date().toISOString();
+  const hash = hashPassword(params.adminPassword);
+
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    await pool.query(
+      `INSERT INTO ${pgTable("tenants")} (id, name, active, created_at) VALUES ($1,$2,true,$3)`,
+      [tenantId, params.name.trim(), now]
+    );
+    await pool.query(
+      `INSERT INTO ${pgTable("users")} (id,tenant_id,name,email,password_hash,role,active,created_at) VALUES ($1,$2,$3,$4,$5,'admin',true,$6)`,
+      [userId, tenantId, params.adminName.trim(), params.adminEmail.trim().toLowerCase(), hash, now]
+    );
+  } else {
+    const db = getSqlite();
+    db.prepare("INSERT INTO tenants (id,name,active,created_at) VALUES (?,?,1,?)").run(tenantId, params.name.trim(), now);
+    db.prepare("INSERT INTO users (id,tenant_id,name,email,password_hash,role,active,created_at) VALUES (?,?,?,?,?,'admin',1,?)").run(
+      userId, tenantId, params.adminName.trim(), params.adminEmail.trim().toLowerCase(), hash, now
+    );
+  }
+  return { tenantId, userId };
+}
+
+export async function toggleTenantActive(tenantId: string): Promise<{ active: boolean }> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const result = await getPostgresPool().query<{ active: boolean }>(
+      `UPDATE ${pgTable("tenants")} SET active = NOT active WHERE id = $1 RETURNING active`,
+      [tenantId]
+    );
+    return { active: result.rows[0]?.active ?? true };
+  }
+  const db = getSqlite();
+  db.prepare("UPDATE tenants SET active = CASE WHEN active=1 THEN 0 ELSE 1 END WHERE id=?").run(tenantId);
+  const row = db.prepare("SELECT active FROM tenants WHERE id=?").get(tenantId) as { active: number } | undefined;
+  return { active: row?.active === 1 };
+}
+
+// ── Password reset ───────────────────────────────────────────────────────────
+
+export async function createPasswordResetToken(
+  email: string
+): Promise<{ token: string; userId: string; tenantId: string; userName: string } | null> {
+  const token = randomUUID();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60).toISOString(); // 1 hour
+
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    const res = await pool.query<{ id: string; tenant_id: string; name: string }>(
+      `SELECT id, tenant_id, name FROM ${pgTable("users")} WHERE email=$1 AND active=true LIMIT 1`,
+      [email.toLowerCase()]
+    );
+    const user = res.rows[0];
+    if (!user) return null;
+    await pool.query(
+      `INSERT INTO ${pgTable("password_reset_tokens")} (token,user_id,tenant_id,expires_at,used) VALUES ($1,$2,$3,$4,false)`,
+      [token, user.id, user.tenant_id, expiresAt]
+    );
+    return { token, userId: user.id, tenantId: user.tenant_id, userName: user.name };
+  }
+
+  const db = getSqlite();
+  const user = db.prepare(
+    "SELECT id, tenant_id, name FROM users WHERE email=? AND active=1 LIMIT 1"
+  ).get(email.toLowerCase()) as { id: string; tenant_id: string; name: string } | undefined;
+  if (!user) return null;
+  db.prepare(
+    "INSERT INTO password_reset_tokens (token,user_id,tenant_id,expires_at,used) VALUES (?,?,?,?,0)"
+  ).run(token, user.id, user.tenant_id, expiresAt);
+  return { token, userId: user.id, tenantId: user.tenant_id, userName: user.name };
+}
+
+export async function consumePasswordResetToken(
+  token: string,
+  newPassword: string
+): Promise<boolean> {
+  if (hasPostgresConfig()) {
+    await ensurePostgresReady();
+    const pool = getPostgresPool();
+    const res = await pool.query<{ user_id: string; expires_at: string; used: boolean }>(
+      `SELECT user_id, expires_at, used FROM ${pgTable("password_reset_tokens")} WHERE token=$1`,
+      [token]
+    );
+    const row = res.rows[0];
+    if (!row || row.used || new Date(row.expires_at).getTime() <= Date.now()) return false;
+    await pool.query(
+      `UPDATE ${pgTable("users")} SET password_hash=$1 WHERE id=$2`,
+      [hashPassword(newPassword), row.user_id]
+    );
+    await pool.query(
+      `UPDATE ${pgTable("password_reset_tokens")} SET used=true WHERE token=$1`,
+      [token]
+    );
+    return true;
+  }
+
+  const db = getSqlite();
+  const row = db.prepare(
+    "SELECT user_id, expires_at, used FROM password_reset_tokens WHERE token=?"
+  ).get(token) as { user_id: string; expires_at: string; used: number } | undefined;
+  if (!row || row.used === 1 || new Date(row.expires_at).getTime() <= Date.now()) return false;
+  db.prepare("UPDATE users SET password_hash=? WHERE id=?").run(hashPassword(newPassword), row.user_id);
+  db.prepare("UPDATE password_reset_tokens SET used=1 WHERE token=?").run(token);
+  return true;
 }
 
 function hashPassword(value: string) {

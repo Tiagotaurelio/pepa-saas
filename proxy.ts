@@ -8,6 +8,8 @@ export function proxy(request: NextRequest) {
   const isPublic =
     pathname === "/login" ||
     pathname === "/demo" ||
+    pathname === "/recuperar-senha" ||
+    pathname === "/redefinir-senha" ||
     pathname === "/api/health" ||
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/pepa/n8n-import") ||

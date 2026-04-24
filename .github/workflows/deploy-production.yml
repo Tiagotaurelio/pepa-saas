@@ -61,6 +61,12 @@ jobs:
             PEPA_N8N_WEBHOOK_URL=${{ secrets.PEPA_N8N_WEBHOOK_URL }}
             PEPA_N8N_TENANT_ID=${{ secrets.PEPA_N8N_TENANT_ID }}
             PEPA_PUBLIC_DOMAIN=${{ secrets.PEPA_PUBLIC_DOMAIN }}
+            PEPA_SMTP_HOST=${{ secrets.PEPA_SMTP_HOST }}
+            PEPA_SMTP_PORT=${{ secrets.PEPA_SMTP_PORT }}
+            PEPA_SMTP_SECURE=${{ secrets.PEPA_SMTP_SECURE }}
+            PEPA_SMTP_USER=${{ secrets.PEPA_SMTP_USER }}
+            PEPA_SMTP_PASS=${{ secrets.PEPA_SMTP_PASS }}
+            PEPA_SMTP_FROM=${{ secrets.PEPA_SMTP_FROM }}
             EOF
             cd "$DEPLOY_PATH"
             docker build --no-cache -t pepa-saas:latest .

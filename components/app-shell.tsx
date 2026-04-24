@@ -10,16 +10,18 @@ type AppShellProps = {
   children: ReactNode;
   tenantName: string | null;
   userName: string | null;
-  userRole: "admin" | "buyer" | null;
+  userRole: "admin" | "buyer" | "super_admin" | null;
 };
 
 export function AppShell({ children, tenantName, userName, userRole }: AppShellProps) {
   const pathname = usePathname();
   const hideChrome = pathname === "/login";
   const [displayTenantName, setDisplayTenantName] = useState(tenantName);
-  const visibleNavigation = navigation.filter(
-    (item) => !item.adminOnly || userRole === "admin"
-  );
+  const visibleNavigation = navigation.filter((item) => {
+    if (item.superAdminOnly) return userRole === "super_admin";
+    if (item.adminOnly) return userRole === "admin" || userRole === "super_admin";
+    return true;
+  });
 
   useEffect(() => {
     if (tenantName) setDisplayTenantName(tenantName);
