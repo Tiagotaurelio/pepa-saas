@@ -209,15 +209,31 @@ export async function POST(request: NextRequest) {
 
       let preco = matchedPrice;
 
-      // Unit conversion: RL (rolo) → MT (metros) for cables
+      // Unit conversion between supplier unit and FLEX unit
       const flexUnit = (row.unit ?? "").toUpperCase().trim();
       const suppUnit = extractUnit(match).toUpperCase().trim();
+
+      // Helper: extract meters from description using dimension pattern (e.g. 19MMX5M → 5) or 2+ digit number (e.g. 10M, 100M)
+      function metersFromDescription(desc: string): number | null {
+        const dimMatch = desc.match(/[xX×]\s*(\d+)\s*M\b/i);
+        const numMatch = desc.match(/\b(\d{2,})\s*M\b/i);
+        const m = dimMatch ?? numMatch;
+        return m ? parseInt(m[1], 10) : null;
+      }
+
       if (suppUnit === "RL" && flexUnit !== "RL") {
-        const mMatch = (row.description ?? "").match(/(\d+)\s*M\b/i);
-        if (mMatch && parseInt(mMatch[1]) > 0) {
-          preco = preco / parseInt(mMatch[1]);
+        // Supplier sells per RL, FLEX wants per MT → divide
+        const meters = metersFromDescription(row.description ?? "");
+        if (meters && meters > 0) {
+          preco = preco / meters;
         } else {
           return { ...row, itemStatus: "ocr-pending" as const, offers: [] };
+        }
+      } else if (suppUnit === "MT" && flexUnit === "RL") {
+        // Supplier sells per MT, FLEX wants per RL → multiply
+        const meters = metersFromDescription(row.description ?? "");
+        if (meters && meters > 0) {
+          preco = preco * meters;
         }
       }
 
