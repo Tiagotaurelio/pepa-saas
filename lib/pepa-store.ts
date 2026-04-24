@@ -587,11 +587,6 @@ function convertSupplierPriceToFlexUnit(
     return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
   }
 
-  // RL → UN: both units represent one roll — treat as equivalent, no conversion needed
-  if ((sUnit === "RL" || sUnit === "ROLO") && isFlexUnitSingle) {
-    return { convertedPrice: supplierUnitPrice, convertedQty: supplierQty ?? null };
-  }
-
   // RL → MT conversion: find meters per roll from Flex description
   // Use dimension pattern "X<N>M" first (e.g. 19MMX5M → 5), then 2+ digit fallback (10M, 100M).
   // Avoids matching brand names like "3M" as "3 meters".
@@ -1335,7 +1330,7 @@ function parseTableRows(rows: TableRow[]): Array<{ sku: string; description: str
 
   // --- Comprehensive header aliases ---
   const HEADER_ALIASES: Record<string, string[]> = {
-    sku: ["produto", "codigo", "cod", "cód", "cód.", "ref", "codigo de barras"],
+    sku: ["produto", "codigo", "cod", "cód", "cód.", "item", "ref", "ordem", "seq", "codigo de barras"],
     description: ["descricao", "descrição", "desc", "nome", "material", "descricao dos itens", "descrição dos itens"],
     quantity: ["quantidade", "qtde", "qtd", "qt", "qt. ped", "qt.ped"],
     unit: ["unidade", "un", "und", "un.", "mad."],
