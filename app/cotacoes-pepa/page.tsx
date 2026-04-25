@@ -17,7 +17,7 @@ export default function CotacoesPepaPage() {
     fetch("/api/auth/session")
       .then((r) => r.json())
       .then((d: { session?: { role?: string } }) => {
-        if (d.session?.role === "admin") setIsAdmin(true);
+        if (d.session?.role === "admin" || d.session?.role === "super_admin") setIsAdmin(true);
       })
       .catch(() => {});
   }, []);

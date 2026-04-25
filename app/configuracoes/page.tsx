@@ -19,7 +19,7 @@ export default function ConfiguracoesPage() {
   const router = useRouter();
 
   // Session / role
-  const [role, setRole] = useState<"admin" | "buyer" | null>(null);
+  const [role, setRole] = useState<"admin" | "buyer" | "super_admin" | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Active tab
@@ -46,7 +46,7 @@ export default function ConfiguracoesPage() {
       fetch("/api/pepa/settings").then((r) => r.json())
     ])
       .then(([sessionData, settingsData]: [{ session?: { userId?: string; role?: string } }, { name?: string }]) => {
-        setRole((sessionData.session?.role as "admin" | "buyer") ?? "buyer");
+        setRole((sessionData.session?.role as "admin" | "buyer" | "super_admin") ?? "buyer");
         setCurrentUserId(sessionData.session?.userId ?? null);
         setCompanyName(settingsData.name ?? "");
         setLoading(false);
@@ -56,7 +56,7 @@ export default function ConfiguracoesPage() {
 
   // Load users when switching to Usuarios tab
   useEffect(() => {
-    if (tab === "usuarios" && role === "admin") {
+    if (tab === "usuarios" && (role === "admin" || role === "super_admin")) {
       loadUsers();
     }
   }, [tab, role]);
@@ -148,7 +148,7 @@ export default function ConfiguracoesPage() {
         >
           Empresa
         </button>
-        {role === "admin" && (
+        {role === "admin" || role === "super_admin" && (
           <button
             onClick={() => setTab("usuarios")}
             className={`rounded-xl px-5 py-2 text-sm font-medium transition-colors ${
@@ -202,7 +202,7 @@ export default function ConfiguracoesPage() {
       )}
 
       {/* Usuarios tab */}
-      {tab === "usuarios" && role === "admin" && (
+      {tab === "usuarios" && role === "admin" || role === "super_admin" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Usuarios</h3>
@@ -270,7 +270,7 @@ export default function ConfiguracoesPage() {
                       <td className="px-4 py-3 font-medium text-slate-800">{user.name}</td>
                       <td className="px-4 py-3 text-slate-600">{user.email}</td>
                       <td className="px-4 py-3">
-                        {user.role === "admin" ? (
+                        {user.role === "admin" || role === "super_admin" ? (
                           <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
                             Administrador
                           </span>
