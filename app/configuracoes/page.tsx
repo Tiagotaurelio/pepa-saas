@@ -148,7 +148,7 @@ export default function ConfiguracoesPage() {
         >
           Empresa
         </button>
-        {role === "admin" || role === "super_admin" && (
+        {(role === "admin" || role === "super_admin") && (
           <button
             onClick={() => setTab("usuarios")}
             className={`rounded-xl px-5 py-2 text-sm font-medium transition-colors ${
@@ -202,7 +202,7 @@ export default function ConfiguracoesPage() {
       )}
 
       {/* Usuarios tab */}
-      {tab === "usuarios" && role === "admin" || role === "super_admin" && (
+      {(tab === "usuarios" && (role === "admin" || role === "super_admin")) && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Usuarios</h3>
